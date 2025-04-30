@@ -35,3 +35,5 @@ jobs:
 
       - name: Run script
         run: python trends_fetcher.py
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
