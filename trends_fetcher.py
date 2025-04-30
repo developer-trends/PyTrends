@@ -21,7 +21,8 @@ def connect_to_sheet(sheet_name):
 # ---- Extract Trends from Current Page ----
 def extract_trend_rows(page):
     try:
-        page.wait_for_selector("table tbody tr", timeout=15000)
+        # Increased timeout to 30 seconds in case of slow loading
+        page.wait_for_selector("table tbody tr", timeout=30000)
     except PlaywrightTimeoutError:
         print("⚠️ No table rows found on the page.")
         return []
@@ -30,6 +31,7 @@ def extract_trend_rows(page):
     data = []
 
     count = rows.count()
+    print(f"Found {count} rows.")  # Debugging print to check how many rows were found
     for i in range(count):
         row = rows.nth(i)
         if not row.is_visible():
@@ -85,6 +87,9 @@ def scrape_pages():
         page.goto("https://trends.google.com/trending?geo=KR&category=17", timeout=60000)
         print("✅ Page 1 loaded")
         page.wait_for_timeout(3000)
+
+        # Print out the page content for debugging
+        print(page.content())  # Print page content to check if table rows are in the source HTML
 
         while True:
             all_data += extract_trend_rows(page)
