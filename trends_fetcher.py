@@ -6,14 +6,17 @@ from urllib.parse import quote
 import os
 
 # ---- Google Sheet Setup ----
-def connect_to_sheet(json_keyfile_path, sheet_name):
+def connect_to_sheet(sheet_name):
     scope = [
         'https://spreadsheets.google.com/feeds',
         'https://www.googleapis.com/auth/drive',
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(json_keyfile_path, scope)
+    import json
+    json_creds = json.loads(os.environ["GOOGLE_SA_JSON"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(1)
+    
 
 # ---- Extract Trends from Current Page ----
 def extract_trend_rows(page):
@@ -101,8 +104,9 @@ def chunk_into_rows(flat_list, n=7):
 
 # ---- Main Entrypoint ----
 def main():
-    SHEET_NAME = os.environ.get("SHEET_NAME", "Trends")
-    JSON_KEYFILE = os.environ.get("JSON_KEYFILE", "trends-458208-4d1f98834c57.json")
+    SHEET_NAME = "Trends"
+    sheet = connect_to_sheet(SHEET_NAME)
+    scraped = scrape_pages()
 
     sheet = connect_to_sheet(JSON_KEYFILE, SHEET_NAME)
     scraped = scrape_pages()
