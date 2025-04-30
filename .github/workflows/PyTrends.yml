@@ -3,6 +3,13 @@ name: Run Python Script
 on:
   push:
     branches: [ main ]
+  schedule:
+    - cron: '0 15 * * *'  # KST 00:00
+    - cron: '0 19 * * *'  # KST 04:00
+    - cron: '0 23 * * *'  # KST 08:00
+    - cron: '0 3 * * *'   # KST 12:00
+    - cron: '0 7 * * *'   # KST 16:00
+    - cron: '0 11 * * *'  # KST 20:00
 
 jobs:
   build:
@@ -21,17 +28,10 @@ jobs:
           pip install pandas gspread oauth2client playwright
 
       - name: Write service account key
-        
-        run: echo "${{ secrets.GOOGLE_SA_JSON }}" > service_account.json
-        
-        env:
-          GOOGLE_SA_KEYFILE: service_account.json
+        run: echo "${{ secrets.GOOGLE_SA_JSON }}" > trends-458208-4d1f98834c57.json
 
       - name: Install Playwright browsers
         run: python -m playwright install
 
       - name: Run script
         run: python trends_fetcher.py
-        env:
-          
-          GOOGLE_SA_KEYFILE: service_account.json
