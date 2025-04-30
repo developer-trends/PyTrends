@@ -105,14 +105,15 @@ def chunk_into_rows(flat_list, n=7):
 # ---- Main Entrypoint ----
 def main():
     SHEET_NAME = "Trends"
+    # Connect once, using the JSON loaded from GOOGLE_SA_JSON
     sheet = connect_to_sheet(SHEET_NAME)
-    scraped = scrape_pages()
 
-    sheet = connect_to_sheet(JSON_KEYFILE, SHEET_NAME)
+    # Scrape the data
     scraped = scrape_pages()
-    flat = [item for row in scraped for item in row]
-    rows = chunk_into_rows(flat, 7)
+    flat     = [item for row in scraped for item in row]
+    rows     = chunk_into_rows(flat, 7)
 
+    # Clear and write
     sheet.clear()
     header = [
         "Trending Topic",
@@ -125,6 +126,7 @@ def main():
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved to Google Sheet (2nd tab).")
+
 
 if __name__ == "__main__":
     main()
