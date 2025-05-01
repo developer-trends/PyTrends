@@ -1,9 +1,12 @@
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+#!/usr/bin/env python3
+import os
+import json
 import time
 from urllib.parse import quote
-import os
+
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 # ---- Google Sheet Setup ----
 def connect_to_sheet(sheet_name):
@@ -11,27 +14,24 @@ def connect_to_sheet(sheet_name):
         'https://spreadsheets.google.com/feeds',
         'https://www.googleapis.com/auth/drive',
     ]
-    import json
-    json_creds = json.loads(os.environ["GOOGLE_SA_JSON"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
+    creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(1)
-    
 
 # ---- Extract Trends from Current Page ----
 def extract_trend_rows(page):
     try:
-        # Increased timeout to 30 seconds in case of slow loading
         page.wait_for_selector("table tbody tr", timeout=30000)
     except PlaywrightTimeoutError:
         print("⚠️ No table rows found on the page.")
         return []
 
     rows = page.locator("table tbody tr")
-    data = []
-
     count = rows.count()
-    print(f"Found {count} rows.")  # Debugging print to check how many rows were found
+    print(f"📝 Found {count} table rows")
+
+    data = []
     for i in range(count):
         row = rows.nth(i)
         if not row.is_visible():
@@ -41,55 +41,67 @@ def extract_trend_rows(page):
         if cells.count() < 5:
             continue
 
+        # A: title
         title = cells.nth(1).inner_text().split("\n")[0].strip()
+        # B: volume
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
+        # C/D: Started & Ended
         cell3 = cells.nth(3)
         raw = cell3.inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
-        started = parts[0].strip() if len(parts) > 0 else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        started = parts[0].strip() if parts else ""
+        ended   = parts[1].strip() if len(parts) > 1 else ""
 
+        # Toggle handle for absolute date
         toggle = cell3.locator("div.vdw3Ld")
         try:
-            toggle.click()
-            page.wait_for_timeout(300)
+            toggle.click()                # show absolute date
+            time.sleep(0.3)
             raw2 = cell3.inner_text().split("\n")
-            parts2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
-            target_publish = parts2[0].strip() if parts2 else ended
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            target_publish = p2[0].strip() if p2 else ended
         except:
             target_publish = ended
         finally:
             try:
-                toggle.click()
-                page.wait_for_timeout(100)
+                toggle.click()            # revert to relative
+                time.sleep(0.1)
             except:
                 pass
 
+        # G: Trend Breakdown
         td4 = cells.nth(4)
         span_texts = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic").all_inner_texts()
-        breakdown_items = [t.strip() for t in span_texts if t.strip()]
-        breakdown = ", ".join(breakdown_items)
+        breakdown = ", ".join(t.strip() for t in span_texts if t.strip())
 
+        # E: Explore Link
         q = quote(title)
-        explore_url = f"https://trends.google.com/trends/explore?q={q}&date=now%201-d&geo=KR&hl=ko"
+        explore_url = (
+            "https://trends.google.com/trends/explore"
+            f"?q={q}&date=now%201-d&geo=KR&hl=ko"
+        )
 
         data.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+
     return data
 
 # ---- Scrape All Pages ----
 def scrape_pages():
     all_data = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
         page = browser.new_page()
 
-        page.goto("https://trends.google.com/trending?geo=KR&category=17", timeout=60000)
+        page.goto(
+            "https://trends.google.com/trending?geo=KR&category=17",
+            timeout=60000
+        )
         print("✅ Page 1 loaded")
         page.wait_for_timeout(3000)
-
-        # Print out the page content for debugging
-        print(page.content())  # Print page content to check if table rows are in the source HTML
 
         while True:
             all_data += extract_trend_rows(page)
@@ -103,22 +115,19 @@ def scrape_pages():
         browser.close()
     return all_data
 
-# ---- Helper to Chunk Flat List into Rows ----
-def chunk_into_rows(flat_list, n=7):
-    return [flat_list[i : i + n] for i in range(0, len(flat_list), n)]
+# ---- Helper to Chunk into Rows ----
+def chunk_into_rows(flat, n=7):
+    return [flat[i : i + n] for i in range(0, len(flat), n)]
 
-# ---- Main Entrypoint ----
+# ---- Main ----
 def main():
     SHEET_NAME = "Trends"
-    # Connect once, using the JSON loaded from GOOGLE_SA_JSON
     sheet = connect_to_sheet(SHEET_NAME)
 
-    # Scrape the data
     scraped = scrape_pages()
-    flat     = [item for row in scraped for item in row]
-    rows     = chunk_into_rows(flat, 7)
+    flat    = [item for row in scraped for item in row]
+    rows    = chunk_into_rows(flat, 7)
 
-    # Clear and write
     sheet.clear()
     header = [
         "Trending Topic",
@@ -131,7 +140,6 @@ def main():
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved to Google Sheet (2nd tab).")
-
 
 if __name__ == "__main__":
     main()
