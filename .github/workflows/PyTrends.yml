@@ -1,9 +1,9 @@
-# .github/workflows/Pytrends.yml
 name: Run Trends Scraper
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   schedule:
     - cron: '0 15 * * *'  # KST 00:00
     - cron: '0 19 * * *'  # KST 04:00
@@ -17,14 +17,13 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # your service-account JSON stored as a GitHub secret
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -34,7 +33,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas gspread oauth2client playwright
 
-      - name: Install Chromium system libraries
+      - name: Install Chromium libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -43,10 +42,10 @@ jobs:
             libgbm1 libasound2-data libpangocairo-1.0-0 \
             libxss1 libpci3 libxshmfence1
 
-      - name: Install Playwright dependencies
+      - name: Install Playwright browsers
         run: |
           python -m playwright install-deps
           python -m playwright install
 
-      - name: Run scraper
+      - name: Run Trends Fetcher
         run: python trends_fetcher.py
