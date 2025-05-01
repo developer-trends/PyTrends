@@ -13,7 +13,7 @@ def connect_to_sheet(sheet_name):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    return client.open(sheet_name).get_worksheet(1)
+    return client.open(sheet_name).get_worksheet(0)
 
 def dismiss_cookie_banner(page):
     for label in ("Accept all","I agree","AGREE"):
