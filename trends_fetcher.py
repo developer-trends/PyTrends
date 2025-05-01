@@ -31,25 +31,36 @@ def dismiss_cookie_banner(page):
 
 # ─── Table layout extractor ──────────────────────────────────────────────────
 def extract_table_rows(page):
-    page.wait_for_selector("table tbody tr", timeout=20000)
+    # wait for any <tr> to be attached (DOM), rather than visible
+    try:
+        page.wait_for_selector("table tbody tr", state="attached", timeout=20000)
+    except PlaywrightTimeoutError:
+        print("⚠️ Timed out waiting for table rows to attach")
+        return []
+
     rows = page.locator("table tbody tr")
     out  = []
-    for i in range(rows.count()):
+    count = rows.count()
+    print(f"🔢 Found {count} table rows")
+    for i in range(count):
         row = rows.nth(i)
-        if not row.is_visible(): continue
+        if not row.is_visible():
+            continue
         cells = row.locator("td")
-        if cells.count() < 5: continue
+        if cells.count() < 5:
+            continue
 
+        # A: title, B: volume
         title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        # started / ended
+        # C/D: started / ended
         raw   = cells.nth(3).inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
-        # target publish (toggle absolute)
+        # Toggle to get absolute date
         toggle = cells.nth(3).locator("div.vdw3Ld")
         try:
             toggle.click(); time.sleep(0.2)
@@ -60,12 +71,12 @@ def extract_table_rows(page):
             try: toggle.click(); time.sleep(0.1)
             except: pass
 
-        # breakdown
+        # G: breakdown
         td4 = cells.nth(4)
         spans = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
-        # explore link
+        # E: explore link
         q = quote(title)
         explore_url = (
             "https://trends.google.com/trends/explore"
@@ -77,16 +88,21 @@ def extract_table_rows(page):
 
 # ─── Card layout extractor (fallback) ─────────────────────────────────────────
 def extract_card_rows(page):
-    page.wait_for_selector("div.mZ3RIc", timeout=20000)
+    try:
+        page.wait_for_selector("div.mZ3RIc", timeout=20000)
+    except PlaywrightTimeoutError:
+        print("⚠️ No card elements found")
+        return []
+
     cards = page.locator("div.mZ3RIc")
     out   = []
+    print(f"🃏 Found {cards.count()} card elements")
     for i in range(cards.count()):
-        c = cards.nth(i)
+        c      = cards.nth(i)
         title  = c.locator("button .mUIrbf-vQzf8d").inner_text().strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
-        info = c.locator("div.vdw3Ld").locator("xpath=..") \
-                   .inner_text().split("\n")
+        info = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
         parts = [l for l in info if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
@@ -94,8 +110,7 @@ def extract_card_rows(page):
         toggle = c.locator("div.vdw3Ld")
         try:
             toggle.click(); time.sleep(0.2)
-            info2 = c.locator("div.vdw3Ld").locator("xpath=..") \
-                     .inner_text().split("\n")
+            info2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
             p2    = [l for l in info2 if l and l.lower() not in ("trending_up","timelapse")]
             target_publish = p2[0].strip() if p2 else ended
         finally:
@@ -114,7 +129,7 @@ def extract_card_rows(page):
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
 
-# ─── Main scraper driver ──────────────────────────────────────────────────────
+# ─── Driver that picks table vs cards ──────────────────────────────────────────
 def scrape_pages():
     results = []
     with sync_playwright() as p:
@@ -138,7 +153,7 @@ def scrape_pages():
 
         dismiss_cookie_banner(page)
 
-        # *First* look for a table; if found, use table extractor.
+        # prefer the table extractor if any rows exist
         if page.locator("table tbody tr").count() > 0:
             print("🔢 Table layout detected")
             extractor = extract_table_rows
