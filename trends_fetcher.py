@@ -14,7 +14,6 @@ def connect_to_sheet(sheet_name):
         'https://spreadsheets.google.com/feeds',
         'https://www.googleapis.com/auth/drive',
     ]
-    # load your service-account JSON from the env var
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
@@ -37,20 +36,21 @@ def extract_trend_rows(page):
         row = rows.nth(i)
         if not row.is_visible():
             continue
-
         cells = row.locator("td")
         if cells.count() < 5:
             continue
 
         # A: title
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
         # B: search volume
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
         # C/D: started & ended
         cell3 = cells.nth(3)
-        lines = [l for l in cell3.inner_text().split("\n")
-                 if l and l.lower() not in ("trending_up","timelapse")]
+        lines = [
+            l for l in cell3.inner_text().split("\n")
+            if l and l.lower() not in ("trending_up","timelapse")
+        ]
         started = lines[0].strip() if lines else ""
         ended   = lines[1].strip() if len(lines) > 1 else ""
 
@@ -59,8 +59,10 @@ def extract_trend_rows(page):
         try:
             toggle.click()
             time.sleep(0.2)
-            abs_lines = [l for l in cell3.inner_text().split("\n")
-                         if l and l.lower() not in ("trending_up","timelapse")]
+            abs_lines = [
+                l for l in cell3.inner_text().split("\n")
+                if l and l.lower() not in ("trending_up","timelapse")
+            ]
             target_publish = abs_lines[0].strip() if abs_lines else ended
         finally:
             try:
@@ -71,7 +73,8 @@ def extract_trend_rows(page):
 
         # G: trend breakdown
         td4 = cells.nth(4)
-        span_texts = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic").all_inner_texts()
+        span_texts = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic")\
+                        .all_inner_texts()
         breakdown = ", ".join(t.strip() for t in span_texts if t.strip())
 
         # E: explore link
@@ -81,7 +84,15 @@ def extract_trend_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=ko"
         )
 
-        data.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+        data.append([
+            title,
+            volume,
+            started,
+            ended,
+            explore_url,
+            target_publish,
+            breakdown
+        ])
 
     return data
 
@@ -93,21 +104,33 @@ def scrape_pages():
             headless=True,
             args=["--no-sandbox","--disable-setuid-sandbox"]
         )
-        page = browser.new_page()
+        # ── create a real‐browser context ──
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
+            ),
+            locale="ko-KR",
+            viewport={"width": 1280, "height": 800},
+            extra_http_headers={"Accept-Language": "ko-KR,en-US;q=0.9"}
+        )
+        page = context.new_page()
 
         page.goto(
             "https://trends.google.com/trending?geo=KR&category=17",
             timeout=60000
         )
         print("✅ Page 1 loaded")
-        # wait until JS has settled
+        # wait for JS/SPAs to finish
         page.wait_for_load_state("networkidle")
 
         while True:
             batch = extract_trend_rows(page)
             all_data += batch
-            # click Next if available
-            nxt = page.locator('button[aria-label="Go to next page"]:not([disabled])')
+
+            nxt = page.locator(
+                'button[aria-label="Go to next page"]:not([disabled])'
+            )
             if nxt.count() == 0:
                 break
             nxt.click()
@@ -121,10 +144,10 @@ def scrape_pages():
 def chunk_into_rows(flat_list, n=7):
     return [flat_list[i:i+n] for i in range(0, len(flat_list), n)]
 
-# ---- Main ----
+# ---- Main entrypoint ----
 def main():
-    SHEET_NAME   = "Trends"
-    sheet        = connect_to_sheet(SHEET_NAME)
+    SHEET_NAME = "Trends"
+    sheet      = connect_to_sheet(SHEET_NAME)
 
     scraped = scrape_pages()
     flat    = [item for row in scraped for item in row]
@@ -132,8 +155,9 @@ def main():
 
     sheet.clear()
     header = [
-        "Trending Topic", "Search Volume", "Started Time", "Ended Time",
-        "Explore Link", "Target Publish Date", "Trend Breakdown"
+        "Trending Topic", "Search Volume", "Started Time",
+        "Ended Time", "Explore Link", "Target Publish Date",
+        "Trend Breakdown"
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved to Google Sheet (2nd tab).")
