@@ -17,11 +17,13 @@ def connect_to_sheet(sheet_name):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
+    # write into the 2nd tab
     return client.open(sheet_name).get_worksheet(1)
 
 # ---- Extract Trends from Current Page ----
 def extract_trend_rows(page):
     try:
+        # wait for the table to actually hydrate
         page.wait_for_selector("table tbody tr", timeout=30000)
     except PlaywrightTimeoutError:
         print("⚠️ No table rows found on the page.")
@@ -49,23 +51,24 @@ def extract_trend_rows(page):
         # C/D: Started & Ended
         cell3 = cells.nth(3)
         raw = cell3.inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        parts = [l for l in raw if l.strip() and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts) > 1 else ""
 
-        # Toggle handle for absolute date
+        # toggle handle for absolute date
         toggle = cell3.locator("div.vdw3Ld")
         try:
-            toggle.click()                # show absolute date
+            toggle.click()                # flip to absolute
             time.sleep(0.3)
             raw2 = cell3.inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            p2   = [l for l in raw2 if l.strip() and l.lower() not in ("trending_up","timelapse")]
             target_publish = p2[0].strip() if p2 else ended
         except:
             target_publish = ended
         finally:
+            # flip back to relative
             try:
-                toggle.click()            # revert to relative
+                toggle.click()
                 time.sleep(0.1)
             except:
                 pass
@@ -90,9 +93,10 @@ def extract_trend_rows(page):
 def scrape_pages():
     all_data = []
     with sync_playwright() as p:
+        # <-- add no-sandbox flags so Chromium actually launches in GH Actions
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=["--no-sandbox","--disable-setuid-sandbox"]
         )
         page = browser.new_page()
 
@@ -101,7 +105,8 @@ def scrape_pages():
             timeout=60000
         )
         print("✅ Page 1 loaded")
-        page.wait_for_timeout(3000)
+        # let client-side React run
+        page.wait_for_load_state("networkidle")
 
         while True:
             all_data += extract_trend_rows(page)
@@ -115,11 +120,9 @@ def scrape_pages():
         browser.close()
     return all_data
 
-# ---- Helper to Chunk into Rows ----
 def chunk_into_rows(flat, n=7):
-    return [flat[i : i + n] for i in range(0, len(flat), n)]
+    return [flat[i:i+n] for i in range(0, len(flat), n)]
 
-# ---- Main ----
 def main():
     SHEET_NAME = "Trends"
     sheet = connect_to_sheet(SHEET_NAME)
