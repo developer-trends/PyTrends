@@ -1,3 +1,4 @@
+# .github/workflows/Pytrends.yml
 name: Run Python Script
 
 on:
@@ -15,6 +16,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # expose your JSON secret directly to the script
+    env:
+      GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+
     steps:
       - uses: actions/checkout@v3
 
@@ -27,19 +32,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas gspread oauth2client playwright
 
-      - name: Write service account key
-        run: |
-          printf '%s' "${{ secrets.GOOGLE_SA_JSON }}" > trends-458208-4d1f98834c57.json
-
-      # ─────────── New ───────────
       - name: Install Playwright OS dependencies
         run: python -m playwright install-deps
-      # ───────────────────────────
 
       - name: Install Playwright browsers
         run: python -m playwright install
 
-      - name: Run script
+      - name: Run scraper
         run: python trends_fetcher.py
-        env:
-          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
