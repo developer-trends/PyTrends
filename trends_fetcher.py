@@ -6,7 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright
 
-# ─── 1) Google Sheets Setup ────────────────────────────────────────────────────
+# ─── Google Sheets Setup (2nd tab) ────────────────────────────────────────────
 def connect_to_sheet(sheet_name: str):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -15,137 +15,117 @@ def connect_to_sheet(sheet_name: str):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    # second tab is index 1
     return client.open(sheet_name).get_worksheet(1)
 
 
-# ─── 2) Scrape one page of “cards” ─────────────────────────────────────────────
+# ─── Scrape one “card” page ───────────────────────────────────────────────────
 def extract_card_rows(page):
-    # wait for at least one card
     page.wait_for_selector("div.mZ3RIc", timeout=20000)
     cards = page.locator("div.mZ3RIc")
-    count = cards.count()
-    print(f"🃏 Found {count} cards on this page")
+    n = cards.count()
+    print(f"🃏 Found {n} cards on this page")
     out = []
 
-    for i in range(count):
+    for i in range(n):
         c = cards.nth(i)
 
-        title = c.locator("button .mUIrbf-vQzf8d").inner_text().strip()
+        # title: just grab the first visible span.mUIrbf-vQzf8d
+        title = c.locator("span.mUIrbf-vQzf8d").first.inner_text().strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
-        # the little “Started/Ended” cell lives next to div.vdw3Ld
+        # started/ended live under the sibling of that little chart div
         info = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [
-            line
-            for line in info
-            if line and line.lower() not in ("trending_up", "timelapse")
-        ]
+        parts = [l for l in info if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if len(parts) > 0 else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts) > 1 else ""
 
-        # toggle button to flip to absolute date → target_publish
+        # flip to absolute → target publish
         toggle = c.locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click()
-            time.sleep(0.2)
+            time.sleep(0.25)   # give it a moment
             flip = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2 = [
-                l
-                for l in flip
-                if l and l.lower() not in ("trending_up", "timelapse")
-            ]
-            target_publish = p2[0].strip() if p2 else ended
+            p2   = [l for l in flip if l and l.lower() not in ("trending_up", "timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
         finally:
-            # flip back
             try:
                 toggle.click()
-                time.sleep(0.1)
+                time.sleep(0.25)
             except:
                 pass
 
-        # trend breakdown
+        # breakdown
         spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
-        # explore link
+        # explore URL
         q = quote(title)
         explore_url = (
             "https://trends.google.com/trends/explore"
             f"?q={q}&date=now%201-d&geo=KR&hl=ko"
         )
 
-        out.append(
-            [title, volume, started, ended, explore_url, target_publish, breakdown]
-        )
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
 
     return out
 
 
-# ─── 3) Pagination driver ─────────────────────────────────────────────────────
+# ─── Drive the “next page” loop ───────────────────────────────────────────────
 def scrape_all_pages():
-    results = []
+    all_rows = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = browser.new_page()
         page.goto(
-            "https://trends.google.com/trending?geo=KR&category=17", timeout=60000
+            "https://trends.google.com/trending?geo=KR&category=17",
+            timeout=60000
         )
         page.wait_for_load_state("networkidle")
-        print("✅ Page loaded")
+        print("✅ First page loaded")
 
-        # first page
-        batch = extract_card_rows(page)
-        results.extend(batch)
+        # first batch
+        all_rows.extend(extract_card_rows(page))
 
-        # then loop “Next”
+        # then paginate
         while True:
             btn = page.locator('button[aria-label="Go to next page"]')
             if btn.count() == 0:
-                print("🚫 No next‐page button found → done")
+                print("🚫 No Next button → done")
                 break
             nxt = btn.first
-            # if it’s disabled
-            if nxt.get_attribute("disabled") is not None or nxt.get_attribute(
-                "aria-disabled"
-            ) == "true":
-                print("✅ Next button disabled → end reached")
+            # stop if disabled either way
+            if nxt.get_attribute("disabled") is not None or \
+               nxt.get_attribute("aria-disabled") == "true":
+                print("✅ Next is disabled → end reached")
                 break
+
             nxt.click()
-            print("⏳ Clicked Next → waiting for cards…")
-            # wait for new batch: simple fixed wait
+            print("⏳ Clicked ▶ → waiting for new cards…")
             time.sleep(2)
-            batch = extract_card_rows(page)
-            results.extend(batch)
+            all_rows.extend(extract_card_rows(page))
 
         browser.close()
 
-    return results
+    return all_rows
 
 
-# ─── 4) Flatten & upload ───────────────────────────────────────────────────────
+# ─── Main & upload ────────────────────────────────────────────────────────────
 def main():
     sheet = connect_to_sheet("Trends")
-    all_rows = scrape_all_pages()
+    rows  = scrape_all_pages()
 
-    # header + rows
     header = [
-        "Trending Topic",
-        "Search Volume",
-        "Started Time",
-        "Ended Time",
-        "Explore Link",
-        "Target Publish Date",
-        "Trend Breakdown",
+        "Trending Topic","Search Volume","Started Time","Ended Time",
+        "Explore Link","Target Publish Date","Trend Breakdown",
     ]
-    # batch‐write
     sheet.clear()
-    sheet.append_rows([header] + all_rows, value_input_option="RAW")
-    print(f"✅ {len(all_rows)} total trends saved")
-
+    # one batch upload
+    sheet.append_rows([header] + rows, value_input_option="RAW")
+    print(f"✅ {len(rows)} total trends saved to Google Sheets (2nd tab)")
 
 if __name__ == "__main__":
     main()
