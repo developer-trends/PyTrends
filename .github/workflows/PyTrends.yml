@@ -1,4 +1,3 @@
-# .github/workflows/Pytrends.yml
 name: Run Python Script
 
 on:
@@ -16,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # expose your JSON secret directly to the script
+    # Make your JSON creds available
     env:
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
 
@@ -32,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas gspread oauth2client playwright
 
-      - name: Install Playwright OS dependencies
+      - name: Install Playwright OS deps
         run: python -m playwright install-deps
 
       - name: Install Playwright browsers
