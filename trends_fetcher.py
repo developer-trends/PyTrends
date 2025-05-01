@@ -42,8 +42,7 @@ def extract_table_rows(page):
 
     rows = page.locator("table[role='grid'] tbody tr")
     print(f"🔢 Found {rows.count()} rows on this page")
-    data = []
-
+    page_data = []
     for i in range(rows.count()):
         tr = rows.nth(i)
         if not tr.is_visible():
@@ -52,15 +51,15 @@ def extract_table_rows(page):
         if cells.count() < 5:
             continue
 
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
         raw = cells.nth(3).inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts) > 1 else ""
 
-        # Toggle absolute publish date
+        # Toggle to get absolute publish date then back
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
@@ -85,7 +84,7 @@ def extract_table_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=ko"
         )
 
-        data.append([
+        page_data.append([
             title,
             volume,
             started,
@@ -94,10 +93,9 @@ def extract_table_rows(page):
             target_publish,
             breakdown
         ])
+    return page_data
 
-    return data
-
-# ─── Scrape & paginate until no more pages ───────────────────────────────────────
+# ─── Scrape & paginate until end ───────────────────────────────────────────────
 def scrape_pages():
     all_data = []
     with sync_playwright() as pw:
@@ -112,22 +110,23 @@ def scrape_pages():
         )
         page = context.new_page()
 
-        # Load first page
-        page.goto("https://trends.google.com/trending?geo=KR&category=17", timeout=60000)
+        # 1) Load first page
+        url = "https://trends.google.com/trending?geo=KR&category=17"
+        page.goto(url, timeout=60000)
         page.wait_for_load_state("networkidle")
         print("✅ First page loaded")
 
         dismiss_cookie_banner(page)
 
-        # Scrape first page
+        # 2) Scrape first page
         batch = extract_table_rows(page)
         all_data.extend(batch)
 
-        # Then loop: click “>”, wait, scrape, until disabled
+        # 3) Loop: click next >, wait, scrape, until disabled
         while True:
             btn = page.locator('button[aria-label="Go to next page"]')
             if btn.count() == 0:
-                print("🚫 No next-page button found – stopping")
+                print("🚫 No next-page button – stopping")
                 break
 
             disabled = btn.first.get_attribute("aria-disabled") or "true"
@@ -135,13 +134,11 @@ def scrape_pages():
                 print("✅ Reached last page – stopping")
                 break
 
-            # Click next page
             btn.first.click()
             print("⏳ Clicked next page – waiting for new data…")
             page.wait_for_timeout(2000)
             page.wait_for_load_state("networkidle")
 
-            # Scrape newly loaded page
             batch = extract_table_rows(page)
             all_data.extend(batch)
 
@@ -154,10 +151,10 @@ def chunk(flat_list, n=7):
 
 # ─── Main Entrypoint ───────────────────────────────────────────────────────────
 def main():
-    sheet = connect_to_sheet("Trends")
+    sheet   = connect_to_sheet("Trends")
     scraped = scrape_pages()
-    flat = [item for row in scraped for item in row]
-    rows = chunk(flat, 7)
+    flat    = [item for row in scraped for item in row]
+    rows    = chunk(flat, 7)
 
     sheet.clear()
     header = [
