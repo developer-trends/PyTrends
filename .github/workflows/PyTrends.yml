@@ -35,10 +35,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-            libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
-            libgbm1 libasound2 libpangocairo-1.0-0 libxss1 \
-            libpci3 libxshmfence1
+            libnss3 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libx11-xcb1 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libgbm1 \
+            libasound2-data \
+            libpangocairo-1.0-0 \
+            libxss1 \
+            libpci3 \
+            libxshmfence1
 
       - name: Install Playwright OS deps
         run: python -m playwright install-deps
