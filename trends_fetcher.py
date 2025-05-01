@@ -8,7 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-# ─── Google Sheets (2nd tab) ───────────────────────────────────────────────────
+# ─── Google Sheets (2nd tab) ───────────────────────────────────────────
 def connect_to_sheet(sheet_name):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -19,11 +19,11 @@ def connect_to_sheet(sheet_name):
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(1)
 
-# ─── Dismiss cookie consent if present ────────────────────────────────────────
+# ─── Dismiss cookie consent if present ───────────────────────────────────
 def dismiss_cookie_banner(page):
-    for btn_label in ("Accept all", "I agree", "AGREE"):
+    for label in ("Accept all", "I agree", "AGREE"):
         try:
-            btn = page.get_by_role("button", name=btn_label)
+            btn = page.get_by_role("button", name=label)
             if btn.count():
                 btn.first.click()
                 page.wait_for_timeout(800)
@@ -32,18 +32,20 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
-# ─── Extract one page of table rows ─────────────────────────────────────────────
+# ─── Extract rows from the table on current page ─────────────────────────
 def extract_table_rows(page):
     try:
-        page.wait_for_selector("table[role='grid'] tbody tr", timeout=20000)
+        page.wait_for_selector("table tbody tr", timeout=20000)
     except PlaywrightTimeoutError:
         print("⚠️ No table rows found on this page.")
         return []
 
-    rows = page.locator("table[role='grid'] tbody tr")
-    print(f"🔢 Found {rows.count()} rows on this page")
-    page_data = []
-    for i in range(rows.count()):
+    rows = page.locator("table tbody tr")
+    count = rows.count()
+    print(f"🔢 Found {count} rows on this page")
+    data = []
+
+    for i in range(count):
         tr = rows.nth(i)
         if not tr.is_visible():
             continue
@@ -59,21 +61,17 @@ def extract_table_rows(page):
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts) > 1 else ""
 
-        # Toggle to get absolute publish date then back
+        # toggle for absolute date
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
-            toggle.click()
-            time.sleep(0.2)
+            toggle.click(); time.sleep(0.2)
             flip = cells.nth(3).inner_text().split("\n")
             p2 = [l for l in flip if l and l.lower() not in ("trending_up", "timelapse")]
             target_publish = p2[0].strip() if p2 else ended
         finally:
-            try:
-                toggle.click()
-                time.sleep(0.1)
-            except:
-                pass
+            try: toggle.click(); time.sleep(0.1)
+            except: pass
 
         spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
         breakdown = ", ".join(t.strip() for t in spans.all_inner_texts() if t.strip())
@@ -84,7 +82,7 @@ def extract_table_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=ko"
         )
 
-        page_data.append([
+        data.append([
             title,
             volume,
             started,
@@ -93,20 +91,21 @@ def extract_table_rows(page):
             target_publish,
             breakdown
         ])
-    return page_data
 
-# ─── Scrape & paginate until end ───────────────────────────────────────────────
+    return data
+
+# ─── Scrape all pages: load, scrape, click next until disabled ──────────
 def scrape_pages():
     all_data = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=["--no-sandbox","--disable-setuid-sandbox"]
         )
         context = browser.new_context(
             locale="en-US",
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
+            viewport={"width":1280,"height":800},
+            extra_http_headers={"Accept-Language":"en-US,en;q=0.9"}
         )
         page = context.new_page()
 
@@ -122,22 +121,26 @@ def scrape_pages():
         batch = extract_table_rows(page)
         all_data.extend(batch)
 
-        # 3) Loop: click next >, wait, scrape, until disabled
+        # 3) Pagination loop
         while True:
-            btn = page.locator('button[aria-label="Go to next page"]')
+            btn = page.locator(
+                'button[aria-label="Next page"], button[aria-label="Go to next page"]'
+            )
             if btn.count() == 0:
                 print("🚫 No next-page button – stopping")
                 break
 
-            disabled = btn.first.get_attribute("aria-disabled") or "true"
-            if disabled.lower() == "true":
-                print("✅ Reached last page – stopping")
+            first = btn.first
+            disabled_attr = first.get_attribute("disabled")
+            aria_disabled = first.get_attribute("aria-disabled") or "false"
+            if disabled_attr is not None or aria_disabled.lower() == "true":
+                print("✅ Next button disabled – end reached")
                 break
 
-            btn.first.click()
-            print("⏳ Clicked next page – waiting for new data…")
+            first.click()
+            print("⏳ Clicked next – waiting for new data…")
             page.wait_for_timeout(2000)
-            page.wait_for_load_state("networkidle")
+            page.wait_for_selector("table tbody tr", timeout=20000)
 
             batch = extract_table_rows(page)
             all_data.extend(batch)
@@ -145,24 +148,24 @@ def scrape_pages():
         browser.close()
     return all_data
 
-# ─── Helper: chunk flat list into 7-column rows ─────────────────────────────────
-def chunk(flat_list, n=7):
-    return [flat_list[i:i+n] for i in range(0, len(flat_list), n)]
+# ─── Chunk helper ─────────────────────────────────────────────────────────
+def chunk(flat, n=7):
+    return [flat[i:i+n] for i in range(0, len(flat), n)]
 
-# ─── Main Entrypoint ───────────────────────────────────────────────────────────
+# ─── Main Entrypoint ────────────────────────────────────────────────────────
 def main():
-    sheet   = connect_to_sheet("Trends")
+    sheet = connect_to_sheet("Trends")
     scraped = scrape_pages()
-    flat    = [item for row in scraped for item in row]
-    rows    = chunk(flat, 7)
+    flat = [item for row in scraped for item in row]
+    rows = chunk(flat, 7)
 
     sheet.clear()
     header = [
-        "Trending Topic", "Search Volume", "Started Time", "Ended Time",
-        "Explore Link", "Target Publish Date", "Trend Breakdown"
+        "Trending Topic","Search Volume","Started Time","Ended Time",
+        "Explore Link","Target Publish Date","Trend Breakdown"
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} total trends saved")
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
