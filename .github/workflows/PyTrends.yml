@@ -1,3 +1,4 @@
+# .github/workflows/Pytrends.yml
 name: Run Python Script
 
 on:
@@ -15,7 +16,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # Make your JSON creds available
     env:
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
 
@@ -26,10 +26,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas gspread oauth2client playwright
+
+      - name: Install Chromium system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
+            libgbm1 libasound2 libpangocairo-1.0-0 libxss1 \
+            libpci3 libxshmfence1
 
       - name: Install Playwright OS deps
         run: python -m playwright install-deps
