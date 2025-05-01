@@ -5,7 +5,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-# ─── Connect to your 2nd sheet ─────────────────────────────────────────────────
+# ─── Google Sheets (2nd tab) ───────────────────────────────────────────────────
 def connect_to_sheet(sheet_name):
     scope = [
       'https://spreadsheets.google.com/feeds',
@@ -16,49 +16,91 @@ def connect_to_sheet(sheet_name):
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(1)
 
-# ─── Dismiss Cookies Banner ────────────────────────────────────────────────────
+# ─── Dismiss cookie consent if present ────────────────────────────────────────
 def dismiss_cookie_banner(page):
-    # look for any button that says "Accept all" or "I agree"
-    for txt in ("Accept all", "I agree", "AGREE"):
+    for btn_label in ("Accept all","I agree","AGREE"):
         try:
-            btn = page.get_by_role("button", name=txt)
+            btn = page.get_by_role("button", name=btn_label)
             if btn.count():
-                btn.first.click(timeout=5000)
-                page.wait_for_timeout(1000)
+                btn.first.click()
+                page.wait_for_timeout(800)
                 print("🛡️ Dismissed cookie banner")
                 return
         except:
             pass
 
-# ─── Extract the card layout (Sports filtered) ─────────────────────────────────
+# ─── Table layout extractor ──────────────────────────────────────────────────
+def extract_table_rows(page):
+    page.wait_for_selector("table tbody tr", timeout=20000)
+    rows = page.locator("table tbody tr")
+    out  = []
+    for i in range(rows.count()):
+        row = rows.nth(i)
+        if not row.is_visible(): continue
+        cells = row.locator("td")
+        if cells.count() < 5: continue
+
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
+        volume = cells.nth(2).inner_text().split("\n")[0].strip()
+
+        # started / ended
+        raw   = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        started = parts[0].strip() if parts else ""
+        ended   = parts[1].strip() if len(parts)>1 else ""
+
+        # target publish (toggle absolute)
+        toggle = cells.nth(3).locator("div.vdw3Ld")
+        try:
+            toggle.click(); time.sleep(0.2)
+            raw2   = cells.nth(3).inner_text().split("\n")
+            p2     = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            target_publish = p2[0].strip() if p2 else ended
+        finally:
+            try: toggle.click(); time.sleep(0.1)
+            except: pass
+
+        # breakdown
+        td4 = cells.nth(4)
+        spans = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic")
+        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
+
+        # explore link
+        q = quote(title)
+        explore_url = (
+            "https://trends.google.com/trends/explore"
+            f"?q={q}&date=now%201-d&geo=KR&hl=ko"
+        )
+
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+    return out
+
+# ─── Card layout extractor (fallback) ─────────────────────────────────────────
 def extract_card_rows(page):
-    page.wait_for_selector("div.mZ3RIc", timeout=30000)
+    page.wait_for_selector("div.mZ3RIc", timeout=20000)
     cards = page.locator("div.mZ3RIc")
-    out = []
+    out   = []
     for i in range(cards.count()):
         c = cards.nth(i)
         title  = c.locator("button .mUIrbf-vQzf8d").inner_text().strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
-        info = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+        info = c.locator("div.vdw3Ld").locator("xpath=..") \
+                   .inner_text().split("\n")
         parts = [l for l in info if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
-        # toggle for absolute
         toggle = c.locator("div.vdw3Ld")
         try:
-            toggle.click()
-            time.sleep(0.2)
-            info2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+            toggle.click(); time.sleep(0.2)
+            info2 = c.locator("div.vdw3Ld").locator("xpath=..") \
+                     .inner_text().split("\n")
             p2    = [l for l in info2 if l and l.lower() not in ("trending_up","timelapse")]
             target_publish = p2[0].strip() if p2 else ended
         finally:
-            try:
-                toggle.click()
-                time.sleep(0.1)
-            except:
-                pass
+            try: toggle.click(); time.sleep(0.1)
+            except: pass
 
         spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
         breakdown = ", ".join(t.strip() for t in spans.all_inner_texts() if t.strip())
@@ -72,64 +114,22 @@ def extract_card_rows(page):
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
 
-# ─── Extract the classic table layout ──────────────────────────────────────────
-def extract_table_rows(page):
-    page.wait_for_selector("table tbody tr", timeout=30000)
-    rows = page.locator("table tbody tr")
-    out  = []
-    for i in range(rows.count()):
-        r = rows.nth(i)
-        if not r.is_visible(): continue
-        cells = r.locator("td")
-        if cells.count() < 5: continue
-
-        title  = cells.nth(1).inner_text().split("\n")[0].strip()
-        volume = cells.nth(2).inner_text().split("\n")[0].strip()
-
-        raw    = cells.nth(3).inner_text().split("\n")
-        parts  = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started= parts[0].strip() if parts else ""
-        ended  = parts[1].strip() if len(parts)>1 else ""
-
-        toggle = cells.nth(3).locator("div.vdw3Ld")
-        try:
-            toggle.click(); time.sleep(0.2)
-            raw2   = cells.nth(3).inner_text().split("\n")
-            p2     = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            target_publish = p2[0].strip() if p2 else ended
-        finally:
-            try: toggle.click(); time.sleep(0.1)
-            except: pass
-
-        td4 = cells.nth(4)
-        spans = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
-
-        q = quote(title)
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=ko"
-        )
-
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
-    return out
-
-# ─── Drive the whole thing ────────────────────────────────────────────────────
+# ─── Main scraper driver ──────────────────────────────────────────────────────
 def scrape_pages():
-    all_data = []
+    results = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
           headless=True,
           args=["--no-sandbox","--disable-setuid-sandbox"]
         )
         ctx = browser.new_context(
+          locale="ko-KR",
+          viewport={"width":1280,"height":800},
+          extra_http_headers={"Accept-Language":"ko-KR,en-US;q=0.9"},
           user_agent=(
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
-          ),
-          locale="ko-KR",
-          viewport={"width":1280,"height":800},
-          extra_http_headers={"Accept-Language":"ko-KR,en-US;q=0.9"}
+          )
         )
         page = ctx.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17", timeout=60000)
@@ -138,18 +138,18 @@ def scrape_pages():
 
         dismiss_cookie_banner(page)
 
-        # choose extractor
-        if page.locator("div.mZ3RIc").count() > 0:
-            print("🃏 Card layout detected")
-            extractor = extract_card_rows
-        else:
+        # *First* look for a table; if found, use table extractor.
+        if page.locator("table tbody tr").count() > 0:
             print("🔢 Table layout detected")
             extractor = extract_table_rows
+        else:
+            print("🃏 Card layout detected")
+            extractor = extract_card_rows
 
-        # gather pages
+        # paginate
         while True:
             batch = extractor(page)
-            all_data += batch
+            results += batch
             nxt = page.locator('button[aria-label="Go to next page"]:not([disabled])')
             if nxt.count() == 0:
                 break
@@ -158,11 +158,10 @@ def scrape_pages():
             page.wait_for_timeout(2000)
 
         browser.close()
-
-    return all_data
+    return results
 
 def chunk(flat, n=7):
-    return [flat[i : i+n] for i in range(0, len(flat), n)]
+    return [flat[i:i+n] for i in range(0, len(flat), n)]
 
 def main():
     sheet   = connect_to_sheet("Trends")
@@ -178,5 +177,5 @@ def main():
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved.")
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
