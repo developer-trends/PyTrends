@@ -17,11 +17,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # your service account JSON stored as a GitHub secret
+      # your service-account JSON stored as a GitHub secret
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python packages
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas gspread oauth2client playwright
