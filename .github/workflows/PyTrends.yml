@@ -28,9 +28,10 @@ jobs:
           pip install pandas gspread oauth2client playwright
 
       - name: Write service account key
-        run: echo "${{ secrets.GOOGLE_SA_JSON }}" > trends-458208-4d1f98834c57.json
-     
-      - name: Install Playwright OS deps
+        run: |
+          printf '%s' "${{ secrets.GOOGLE_SA_JSON }}" > trends-458208-4d1f98834c57.json
+
+      - name: Install Playwright OS dependencies
         run: python -m playwright install-deps
 
       - name: Install Playwright browsers
