@@ -5,16 +5,18 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
+# ─── Google Sheets (2nd tab) ───────────────────────────────────────────────────
 def connect_to_sheet(sheet_name):
     scope = [
-      'https://spreadsheets.google.com/feeds',
-      'https://www.googleapis.com/auth/drive',
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive',
     ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(1)
 
+# ─── Dismiss cookie consent if present ────────────────────────────────────────
 def dismiss_cookie_banner(page):
     for btn_label in ("Accept all","I agree","AGREE"):
         try:
@@ -27,6 +29,7 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
+# ─── Table layout extractor ──────────────────────────────────────────────────
 def extract_table_rows(page):
     try:
         page.wait_for_selector("table tbody tr", state="attached", timeout=20000)
@@ -39,9 +42,11 @@ def extract_table_rows(page):
     print(f"🔢 Found {rows.count()} table rows")
     for i in range(rows.count()):
         row = rows.nth(i)
-        if not row.is_visible(): continue
+        if not row.is_visible(): 
+            continue
         cells = row.locator("td")
-        if cells.count() < 5: continue
+        if cells.count() < 5: 
+            continue
 
         title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
@@ -73,6 +78,7 @@ def extract_table_rows(page):
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
 
+# ─── Card layout extractor (fallback) ─────────────────────────────────────────
 def extract_card_rows(page):
     try:
         page.wait_for_selector("div.mZ3RIc", timeout=20000)
@@ -115,6 +121,7 @@ def extract_card_rows(page):
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
 
+# ─── Pagination driver ─────────────────────────────────────────────────────────
 def scrape_pages():
     results = []
     with sync_playwright() as p:
@@ -149,12 +156,14 @@ def scrape_pages():
             batch = extractor(page)
             results += batch
 
-            # ← now we filter by aria-disabled rather than disabled
-            nxt = page.locator('button[aria-label="Go to next page"][aria-disabled="false"]')
+            # <- Updated: match by aria-disabled, then click
+            nxt = page.locator('button[aria-label="Go to next page"]')
             if nxt.count() == 0:
                 break
+            nxt.first.wait_for(state="attached", timeout=5000)
+            if not nxt.first.is_disabled():
+                nxt.first.click()
 
-            nxt.first.click()
             print("⏳ Navigating to next page…")
             page.wait_for_timeout(2000)
 
@@ -172,8 +181,8 @@ def main():
 
     sheet.clear()
     header = [
-        "Trending Topic","Search Volume","Started Time","Ended Time",
-        "Explore Link","Target Publish Date","Trend Breakdown"
+      "Trending Topic","Search Volume","Started Time","Ended Time",
+      "Explore Link","Target Publish Date","Trend Breakdown"
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved.")
