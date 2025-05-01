@@ -29,12 +29,12 @@ jobs:
 
       - name: Write service account key
         run: echo "${{ secrets.GOOGLE_SA_JSON }}" > trends-458208-4d1f98834c57.json
+     
+      - name: Install Playwright OS deps
+        run: python -m playwright install-deps
 
       - name: Install Playwright browsers
         run: python -m playwright install
-
-      - name: Install Playwright OS deps
-        run: python -m playwright install-deps
 
       - name: Run script
         run: python trends_fetcher.py
