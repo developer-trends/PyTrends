@@ -14,12 +14,11 @@ def connect_to_sheet(sheet_name):
         'https://spreadsheets.google.com/feeds',
         'https://www.googleapis.com/auth/drive',
     ]
-    # load service account JSON directly from the env var
+    # load your service-account JSON from the env var
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    # write into the 2nd tab (index 1)
-    return client.open(sheet_name).get_worksheet(1)
+    return client.open(sheet_name).get_worksheet(1)  # 2nd tab
 
 # ---- Extract Trends from Current Page ----
 def extract_trend_rows(page):
@@ -30,11 +29,11 @@ def extract_trend_rows(page):
         return []
 
     rows = page.locator("table tbody tr")
-    count = rows.count()
-    print(f"📝 Found {count} table rows")
+    total = rows.count()
+    print(f"📝 Found {total} rows in the table")
 
     data = []
-    for i in range(count):
+    for i in range(total):
         row = rows.nth(i)
         if not row.is_visible():
             continue
@@ -45,32 +44,32 @@ def extract_trend_rows(page):
 
         # A: title
         title = cells.nth(1).inner_text().split("\n")[0].strip()
-        # B: volume
+        # B: search volume
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        # C/D: Started & Ended
+        # C/D: started & ended
         cell3 = cells.nth(3)
-        raw = cell3.inner_text().split("\n")
-        parts = [l for l in raw if l.strip() and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts) > 1 else ""
+        lines = [l for l in cell3.inner_text().split("\n")
+                 if l and l.lower() not in ("trending_up","timelapse")]
+        started = lines[0].strip() if lines else ""
+        ended   = lines[1].strip() if len(lines) > 1 else ""
 
-        # F: Target Publish Date (toggle to get absolute date, then toggle back)
+        # F: target publish date (toggle absolute then back)
         toggle = cell3.locator("div.vdw3Ld")
         try:
-            toggle.click()                # show absolute date
-            time.sleep(0.3)
-            raw2 = cell3.inner_text().split("\n")
-            p2   = [l for l in raw2 if l.strip() and l.lower() not in ("trending_up","timelapse")]
-            target_publish = p2[0].strip() if p2 else ended
+            toggle.click()
+            time.sleep(0.2)
+            abs_lines = [l for l in cell3.inner_text().split("\n")
+                         if l and l.lower() not in ("trending_up","timelapse")]
+            target_publish = abs_lines[0].strip() if abs_lines else ended
         finally:
             try:
-                toggle.click()            # revert to relative
+                toggle.click()
                 time.sleep(0.1)
             except:
                 pass
 
-        # G: breakdown
+        # G: trend breakdown
         td4 = cells.nth(4)
         span_texts = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic").all_inner_texts()
         breakdown = ", ".join(t.strip() for t in span_texts if t.strip())
@@ -101,24 +100,28 @@ def scrape_pages():
             timeout=60000
         )
         print("✅ Page 1 loaded")
-        page.wait_for_timeout(3000)
+        # wait until JS has settled
+        page.wait_for_load_state("networkidle")
 
         while True:
-            all_data += extract_trend_rows(page)
-            next_btn = page.locator('button[aria-label="Go to next page"]:not([disabled])')
-            if next_btn.count() == 0:
+            batch = extract_trend_rows(page)
+            all_data += batch
+            # click Next if available
+            nxt = page.locator('button[aria-label="Go to next page"]:not([disabled])')
+            if nxt.count() == 0:
                 break
-            next_btn.click()
+            nxt.click()
             print("⏳ Navigating to next page…")
             page.wait_for_timeout(2000)
 
         browser.close()
     return all_data
 
-# ---- Helper to Chunk Flat List into Rows ----
+# ---- Chunk helper ----
 def chunk_into_rows(flat_list, n=7):
-    return [flat_list[i : i + n] for i in range(0, len(flat_list), n)]
+    return [flat_list[i:i+n] for i in range(0, len(flat_list), n)]
 
+# ---- Main ----
 def main():
     SHEET_NAME   = "Trends"
     sheet        = connect_to_sheet(SHEET_NAME)
@@ -129,13 +132,8 @@ def main():
 
     sheet.clear()
     header = [
-        "Trending Topic",
-        "Search Volume",
-        "Started Time",
-        "Ended Time",
-        "Explore Link",
-        "Target Publish Date",
-        "Trend Breakdown",
+        "Trending Topic", "Search Volume", "Started Time", "Ended Time",
+        "Explore Link", "Target Publish Date", "Trend Breakdown"
     ]
     sheet.append_rows([header] + rows, value_input_option="RAW")
     print(f"✅ {len(rows)} trends saved to Google Sheet (2nd tab).")
