@@ -5,22 +5,21 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-# ─── Google Sheets (2nd tab) ───────────────────────────────────────────────────
 def connect_to_sheet(sheet_name):
     scope = [
-      'https://spreadsheets.google.com/feeds',
-      'https://www.googleapis.com/auth/drive',
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
     ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
+    # ← write into the FIRST tab (index=0)
     return client.open(sheet_name).get_worksheet(0)
 
-# ─── Dismiss cookie consent if present ────────────────────────────────────────
 def dismiss_cookie_banner(page):
-    for btn_label in ("Accept all","I agree","AGREE"):
+    for label in ("Accept all", "I agree", "AGREE"):
         try:
-            btn = page.get_by_role("button", name=btn_label)
+            btn = page.get_by_role("button", name=label)
             if btn.count():
                 btn.first.click()
                 page.wait_for_timeout(800)
@@ -29,168 +28,151 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
-# ─── Table layout extractor ──────────────────────────────────────────────────
 def extract_table_rows(page):
-    # wait for any <tr> to be attached (DOM), rather than visible
     try:
-        page.wait_for_selector("table tbody tr", state="attached", timeout=20000)
+        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
     except PlaywrightTimeoutError:
-        print("⚠️ Timed out waiting for table rows to attach")
         return []
-
     rows = page.locator("table tbody tr")
-    out  = []
-    count = rows.count()
-    print(f"🔢 Found {count} table rows")
-    for i in range(count):
+    total = rows.count()
+    print(f"🔢 [table] found {total} rows – skipping the first one")
+
+    out = []
+    # ← start at 1 to skip the very first <tr>
+    for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible():
+        if not row.is_visible(): 
             continue
         cells = row.locator("td")
-        if cells.count() < 5:
+        if cells.count() < 5: 
             continue
 
-        # A: title, B: volume
         title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        # C/D: started / ended
         raw   = cells.nth(3).inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
-        # Toggle to get absolute date
         toggle = cells.nth(3).locator("div.vdw3Ld")
+        target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
-            raw2   = cells.nth(3).inner_text().split("\n")
-            p2     = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            target_publish = p2[0].strip() if p2 else ended
+            raw2 = cells.nth(3).inner_text().split("\n")
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
         finally:
             try: toggle.click(); time.sleep(0.1)
             except: pass
 
-        # G: breakdown
-        td4 = cells.nth(4)
-        spans = td4.locator("span.mUIrbf-vQzf8d, span.Gwdjic")
+        spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
-        # E: explore link
         q = quote(title)
         explore_url = (
             "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=ko"
+            f"?q={q}&date=now%201-d&geo=KR&hl=en"
         )
 
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+
     return out
 
-# ─── Card layout extractor (fallback) ─────────────────────────────────────────
 def extract_card_rows(page):
     try:
-        page.wait_for_selector("div.mZ3RIc", timeout=20000)
+        page.wait_for_selector("div.mZ3RIc", timeout=5000)
     except PlaywrightTimeoutError:
-        print("⚠️ No card elements found")
         return []
-
     cards = page.locator("div.mZ3RIc")
-    out   = []
-    print(f"🃏 Found {cards.count()} card elements")
-    for i in range(cards.count()):
-        c      = cards.nth(i)
-        title  = c.locator("button .mUIrbf-vQzf8d").inner_text().strip()
+    total = cards.count()
+    print(f"🃏 [card] found {total} cards – skipping the first one")
+
+    out = []
+    # ← start at 1 to skip the very first card
+    for i in range(1, total):
+        c = cards.nth(i)
+        title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
-        info = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in info if l and l.lower() not in ("trending_up","timelapse")]
+        raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
         toggle = c.locator("div.vdw3Ld")
+        target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
-            info2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2    = [l for l in info2 if l and l.lower() not in ("trending_up","timelapse")]
-            target_publish = p2[0].strip() if p2 else ended
+            raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
         finally:
             try: toggle.click(); time.sleep(0.1)
             except: pass
 
         spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
-        breakdown = ", ".join(t.strip() for t in spans.all_inner_texts() if t.strip())
+        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
         q = quote(title)
         explore_url = (
             "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=ko"
+            f"?q={q}&date=now%201-d&geo=KR&hl=en"
         )
 
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+
     return out
 
-# ─── Driver that picks table vs cards ──────────────────────────────────────────
-def scrape_pages():
-    results = []
+def scrape_all_pages():
+    all_rows = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
-          headless=True,
-          args=["--no-sandbox","--disable-setuid-sandbox"]
+            headless=True,
+            args=["--no-sandbox","--disable-setuid-sandbox"]
         )
-        ctx = browser.new_context(
-          locale="ko-KR",
-          viewport={"width":1280,"height":800},
-          extra_http_headers={"Accept-Language":"ko-KR,en-US;q=0.9"},
-          user_agent=(
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36"
-          )
-        )
-        page = ctx.new_page()
-        page.goto("https://trends.google.com/trending?geo=KR&category=17", timeout=60000)
+        page = browser.new_page()
+        page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
-        print("✅ Page loaded")
+        print("✅ First page loaded")
 
         dismiss_cookie_banner(page)
 
-        # prefer the table extractor if any rows exist
-        if page.locator("table tbody tr").count() > 0:
-            print("🔢 Table layout detected")
-            extractor = extract_table_rows
-        else:
-            print("🃏 Card layout detected")
-            extractor = extract_card_rows
-
-        # paginate
+        page_num = 1
         while True:
-            batch = extractor(page)
-            results += batch
-            nxt = page.locator('button[aria-label="Go to next page"]:not([disabled])')
-            if nxt.count() == 0:
+            print(f"📄 Scraping page {page_num}")
+            batch = extract_table_rows(page)
+            if not batch:
+                print("⚙️  table extractor returned 0 → falling back to cards")
+                batch = extract_card_rows(page)
+
+            print(f"  → got {len(batch)} rows")
+            all_rows.extend(batch)
+
+            next_btn = page.get_by_role("button", name="Go to next page")
+            if not next_btn.count() or next_btn.first.is_disabled():
+                print("✅ No more pages (▶ gone/disabled)")
                 break
-            nxt.click()
-            print("⏳ Next page…")
-            page.wait_for_timeout(2000)
+
+            next_btn.first.scroll_into_view_if_needed()
+            next_btn.first.click()
+            print("⏳ Clicked ▶ → waiting 3 s…")
+            time.sleep(3)
+            page_num += 1
 
         browser.close()
-    return results
-
-def chunk(flat, n=7):
-    return [flat[i:i+n] for i in range(0, len(flat), n)]
+    return all_rows
 
 def main():
-    sheet   = connect_to_sheet("Trends")
-    scraped = scrape_pages()
-    flat    = [v for row in scraped for v in row]
-    rows    = chunk(flat, 7)
+    sheet = connect_to_sheet("Trends")
+    rows  = scrape_all_pages()
 
+    # ← **no** header row here, just your data
     sheet.clear()
-    header = [
-      "Trending Topic","Search Volume","Started Time","Ended Time",
-      "Explore Link","Target Publish Date","Trend Breakdown"
-    ]
-    sheet.append_rows([header] + rows, value_input_option="RAW")
-    print(f"✅ {len(rows)} trends saved.")
+    sheet.append_rows(rows, value_input_option="RAW")
+    print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
 
 if __name__=="__main__":
     main()
