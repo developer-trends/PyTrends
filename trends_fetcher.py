@@ -34,12 +34,17 @@ def extract_table_rows(page):
         return []
     rows = page.locator("table tbody tr")
     out = []
-    print(f"🔢 [table] found {rows.count()} rows")
-    for i in range(rows.count()):
+    total = rows.count()
+    print(f"🔢 [table] found {total} rows (skipping header)")
+
+    # start at 1 to skip the first row (your header)
+    for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible(): continue
+        if not row.is_visible(): 
+            continue
         cells = row.locator("td")
-        if cells.count() < 5: continue
+        if cells.count() < 5: 
+            continue
 
         title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
@@ -49,14 +54,14 @@ def extract_table_rows(page):
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
-        # flip for absolute
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
             p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            if p2: target_publish = p2[0].strip()
+            if p2: 
+                target_publish = p2[0].strip()
         finally:
             try: toggle.click(); time.sleep(0.1)
             except: pass
@@ -118,7 +123,8 @@ def extract_card_rows(page):
 def scrape_all_pages():
     all_rows = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True,
+        browser = p.chromium.launch(
+            headless=True,
             args=["--no-sandbox","--disable-setuid-sandbox"]
         )
         page = browser.new_page()
@@ -131,20 +137,17 @@ def scrape_all_pages():
 
         dismiss_cookie_banner(page)
 
-        extractor = extract_table_rows
-
         page_num = 1
         while True:
             print(f"📄 Scraping page {page_num}")
-            batch = extractor(page)
+            batch = extract_table_rows(page)
             if not batch:
-                print("⚙️  table extractor returned 0 → falling back to cards")
+                print("⚙️ table extractor returned 0 → falling back to cards")
                 batch = extract_card_rows(page)
 
             print(f"  → got {len(batch)} rows")
             all_rows.extend(batch)
 
-            # **this** is the fix: drive by role/name
             next_btn = page.get_by_role("button", name="Go to next page")
             if not next_btn.count() or next_btn.first.is_disabled():
                 print("✅ No more pages (▶ gone/disabled)")
