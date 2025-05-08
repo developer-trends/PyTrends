@@ -70,9 +70,13 @@ def extract_card_rows(page, browser):
     for i in range(1, total):
         c = cards.nth(i)
         try:
-            title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
-        except IndexError:
-            continue
+    all_titles = c.locator("span.mUIrbf-vQzf8d, span.Gwdjic").all_inner_texts()
+    title = next((t.strip() for t in all_titles if t.strip()), "")
+        except:
+            title = ""
+        if not title:
+            continue  # Skip if title couldn't be extracted
+
 
         volume = c.locator("div.search-count-title").inner_text().strip()
 
