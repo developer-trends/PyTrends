@@ -13,7 +13,6 @@ def connect_to_sheet(sheet_name):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    # ← write into the FIRST tab (index=0)
     return client.open(sheet_name).get_worksheet(0)
 
 def dismiss_cookie_banner(page):
@@ -38,29 +37,27 @@ def extract_table_rows(page):
     print(f"🔢 [table] found {total} rows – skipping the first one")
 
     out = []
-    # ← start at 1 to skip the very first <tr>
     for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible(): 
-            continue
+        if not row.is_visible(): continue
         cells = row.locator("td")
-        if cells.count() < 5: 
-            continue
+        if cells.count() < 5: continue
 
-        title  = cells.nth(1).inner_text().split("\n")[0].strip()
+        title = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        raw   = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        raw = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
+        ended = parts[1].strip() if len(parts) > 1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
-            toggle.click(); time.sleep(0.2)
+            toggle.click()
+            time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -76,7 +73,26 @@ def extract_table_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=en"
         )
 
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+        # 🆕 Detect sport/league from explore page
+        with page.context.new_page() as new_tab:
+            try:
+                new_tab.goto(explore_url, timeout=10000)
+                new_tab.wait_for_selector("body", timeout=5000)
+                body_text = new_tab.inner_text("body")
+                known_tags = [
+                    "UEFA", "NBA", "MLB", "MMA", "LCK", "KBO", "UFC",
+                    "Champions League", "Premier League", "Serie A",
+                    "Bundesliga", "La Liga", "EPL", "J League", "K League"
+                ]
+                detected_tag = next((tag for tag in known_tags if tag.lower() in body_text.lower()), "N/A")
+            except Exception as e:
+                print(f"⚠️ Failed to extract league for {title}: {e}")
+                detected_tag = "N/A"
+
+        out.append([
+            title, volume, started, ended,
+            explore_url, target_publish, breakdown, detected_tag
+        ])
 
     return out
 
@@ -90,23 +106,23 @@ def extract_card_rows(page):
     print(f"🃏 [card] found {total} cards – skipping the first one")
 
     out = []
-    # ← start at 1 to skip the very first card
     for i in range(1, total):
         c = cards.nth(i)
-        title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
+        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
         raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
+        ended = parts[1].strip() if len(parts) > 1 else ""
 
         toggle = c.locator("div.vdw3Ld")
         target_publish = ended
         try:
-            toggle.click(); time.sleep(0.2)
+            toggle.click()
+            time.sleep(0.2)
             raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -122,17 +138,33 @@ def extract_card_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=en"
         )
 
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+        # 🆕 Detect sport/league from explore page
+        with page.context.new_page() as new_tab:
+            try:
+                new_tab.goto(explore_url, timeout=10000)
+                new_tab.wait_for_selector("body", timeout=5000)
+                body_text = new_tab.inner_text("body")
+                known_tags = [
+                    "UEFA", "NBA", "MLB", "MMA", "LCK", "KBO", "UFC",
+                    "Champions League", "Premier League", "Serie A",
+                    "Bundesliga", "La Liga", "EPL", "J League", "K League"
+                ]
+                detected_tag = next((tag for tag in known_tags if tag.lower() in body_text.lower()), "N/A")
+            except Exception as e:
+                print(f"⚠️ Failed to extract league for {title}: {e}")
+                detected_tag = "N/A"
+
+        out.append([
+            title, volume, started, ended,
+            explore_url, target_publish, breakdown, detected_tag
+        ])
 
     return out
 
 def scrape_all_pages():
     all_rows = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox"]
-        )
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
@@ -167,12 +199,12 @@ def scrape_all_pages():
 
 def main():
     sheet = connect_to_sheet("Trends")
-    rows  = scrape_all_pages()
+    rows = scrape_all_pages()
 
-    # ← **no** header row here, just your data
+    # Overwrite sheet with new data
     sheet.clear()
     sheet.append_rows(rows, value_input_option="RAW")
     print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
