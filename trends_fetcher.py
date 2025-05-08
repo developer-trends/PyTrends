@@ -56,27 +56,29 @@ def extract_table_rows(page):
         ended   = parts[1].strip() if len(parts)>1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
-        clean_start_time = started  # default is the loaded "Started" time
-
+        target_publish = ended
         try:
-            toggle.click()
-            page.wait_for_timeout(300)
-        
-            # Search for the full timestamp with AM/PM after expanding
-            raw_lines = cells.nth(3).inner_text().split("\n")
-            date_with_ampm = next((line for line in raw_lines if "," in line and ("AM" in line or "PM" in line)), "")
-            if date_with_ampm:
-                clean_start_time = date_with_ampm.strip()
+            toggle.click(); time.sleep(0.2)
+            raw2 = cells.nth(3).inner_text().split("\n")
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
         finally:
-            try: toggle.click()
+            try: toggle.click(); time.sleep(0.1)
             except: pass
 
-        
-        out.append([title, volume, started, ended, explore_url, clean_start_time, breakdown])
+        spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
+        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
+        q = quote(title)
+        explore_url = (
+            "https://trends.google.com/trends/explore"
+            f"?q={q}&date=now%201-d&geo=KR&hl=en"
+        )
 
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
 
-        return out
+    return out
 
 def extract_card_rows(page):
     try:
