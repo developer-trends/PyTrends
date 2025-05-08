@@ -22,75 +22,66 @@ def dismiss_cookie_banner(page):
             if btn.count():
                 btn.first.click()
                 page.wait_for_timeout(800)
+                print("🛡️ Dismissed cookie banner")
                 return
+        except:
+            pass
+
+def extract_sport_league(browser, url):
+    sport = league = ""
+    try:
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(url, timeout=15000)
+        page.wait_for_load_state("networkidle")
+        time.sleep(1)
+
+        # Attempt to detect sport/league from explore page
+        try:
+            text_blocks = page.locator("text=Sport >> visible=true").all_inner_texts()
+            sport = text_blocks[0] if text_blocks else ""
         except: pass
 
-def extract_sport_league(context, explore_url):
-    try:
-        new_tab = context.new_page()
-        new_tab.goto(explore_url, timeout=20000)
-        new_tab.wait_for_load_state("networkidle")
-        new_tab.wait_for_timeout(1500)
+        try:
+            text_blocks = page.locator("text=League >> visible=true").all_inner_texts()
+            league = text_blocks[0] if text_blocks else ""
+        except: pass
 
-        body_text = new_tab.content()
-
-        sport, league = '', ''
-
-        if "soccer" in body_text.lower() or "football" in body_text.lower():
-            sport = "Soccer"
-        elif "basketball" in body_text.lower():
-            sport = "Basketball"
-        elif "baseball" in body_text.lower():
-            sport = "Baseball"
-        elif "mma" in body_text.lower():
-            sport = "MMA"
-        elif "boxing" in body_text.lower():
-            sport = "Boxing"
-        elif "volleyball" in body_text.lower():
-            sport = "Volleyball"
-
-        for kw in ["Premier League", "La Liga", "Bundesliga", "NBA", "MLB", "UFC", "ONE FC", "Bellator", "KBO", "LCK", "Champions League"]:
-            if kw.lower() in body_text.lower():
-                league = kw
-                break
-
-        new_tab.close()
-        return sport, league
+        context.close()
     except Exception as e:
-        return "", ""
+        print(f"⚠️ Failed to fetch sport/league: {e}")
+    return sport.strip(), league.strip()
 
-def extract_table_rows(page, context):
+def extract_table_rows(page, browser):
     try:
-        page.wait_for_selector("table tbody tr", timeout=5000)
+        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
     except PlaywrightTimeoutError:
         return []
     rows = page.locator("table tbody tr")
     total = rows.count()
-    print(f"🔢 Found {total} table rows")
+    print(f"🔢 [table] found {total} rows – skipping the first one")
 
     out = []
-    for i in range(1, total):  # skip header row
+    for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible():
-            continue
+        if not row.is_visible(): continue
         cells = row.locator("td")
-        if cells.count() < 5:
-            continue
+        if cells.count() < 5: continue
 
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        raw = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        raw   = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts) > 1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -103,26 +94,62 @@ def extract_table_rows(page, context):
         q = quote(title)
         explore_url = f"https://trends.google.com/trends/explore?q={q}&date=now%201-d&geo=KR&hl=en"
 
-        sport, league = extract_sport_league(context, explore_url)
+        # 🎯 Extract sport and league from explore page
+        sport, league = extract_sport_league(browser, explore_url)
 
-        out.append([
-            title,          # A
-            volume,         # B
-            started,        # C
-            ended,          # D
-            explore_url,    # E
-            target_publish, # F
-            breakdown,      # G
-            sport,          # H (now I)
-            league          # I (now J)
-        ])
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown, sport, league])
+
+    return out
+
+def extract_card_rows(page, browser):
+    try:
+        page.wait_for_selector("div.mZ3RIc", timeout=5000)
+    except PlaywrightTimeoutError:
+        return []
+    cards = page.locator("div.mZ3RIc")
+    total = cards.count()
+    print(f"🃏 [card] found {total} cards – skipping the first one")
+
+    out = []
+    for i in range(1, total):
+        c = cards.nth(i)
+        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
+        volume = c.locator("div.search-count-title").inner_text().strip()
+
+        raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        started = parts[0].strip() if parts else ""
+        ended = parts[1].strip() if len(parts) > 1 else ""
+
+        toggle = c.locator("div.vdw3Ld")
+        target_publish = ended
+        try:
+            toggle.click(); time.sleep(0.2)
+            raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
+        finally:
+            try: toggle.click(); time.sleep(0.1)
+            except: pass
+
+        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
+        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
+
+        q = quote(title)
+        explore_url = f"https://trends.google.com/trends/explore?q={q}&date=now%201-d&geo=KR&hl=en"
+
+        # 🎯 Extract sport and league
+        sport, league = extract_sport_league(browser, explore_url)
+
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown, sport, league])
 
     return out
 
 def scrape_all_pages():
     all_rows = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         context = browser.new_context()
         page = context.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
@@ -134,20 +161,22 @@ def scrape_all_pages():
         page_num = 1
         while True:
             print(f"📄 Scraping page {page_num}")
-            batch = extract_table_rows(page, context)
+            batch = extract_table_rows(page, browser)
             if not batch:
-                print("⚠️ No rows found on this page.")
-                break
+                print("⚙️  table extractor returned 0 → falling back to cards")
+                batch = extract_card_rows(page, browser)
 
-            print(f"  → {len(batch)} rows scraped.")
+            print(f"  → got {len(batch)} rows")
             all_rows.extend(batch)
 
             next_btn = page.get_by_role("button", name="Go to next page")
             if not next_btn.count() or next_btn.first.is_disabled():
+                print("✅ No more pages (▶ gone/disabled)")
                 break
 
             next_btn.first.scroll_into_view_if_needed()
             next_btn.first.click()
+            print("⏳ Clicked ▶ → waiting 3 s…")
             time.sleep(3)
             page_num += 1
 
@@ -157,9 +186,11 @@ def scrape_all_pages():
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
+
+    # Add rows to Google Sheet, including new columns: Sport (I), League (J)
     sheet.clear()
     sheet.append_rows(rows, value_input_option="RAW")
-    print(f"✅ {len(rows)} total trends saved to Google Sheet.")
+    print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
 
 if __name__ == "__main__":
     main()
