@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, time
+import os, json, time, re, requests
 from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -13,7 +13,6 @@ def connect_to_sheet(sheet_name):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    # ← write into the FIRST tab (index=0)
     return client.open(sheet_name).get_worksheet(0)
 
 def dismiss_cookie_banner(page):
@@ -38,7 +37,6 @@ def extract_table_rows(page):
     print(f"🔢 [table] found {total} rows – skipping the first one")
 
     out = []
-    # ← start at 1 to skip the very first <tr>
     for i in range(1, total):
         row = rows.nth(i)
         if not row.is_visible(): 
@@ -90,7 +88,6 @@ def extract_card_rows(page):
     print(f"🃏 [card] found {total} cards – skipping the first one")
 
     out = []
-    # ← start at 1 to skip the very first card
     for i in range(1, total):
         c = cards.nth(i)
         title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
@@ -113,7 +110,7 @@ def extract_card_rows(page):
             try: toggle.click(); time.sleep(0.1)
             except: pass
 
-        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
+        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
         q = quote(title)
@@ -165,14 +162,37 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
+def get_sport_league_from_wikipedia(term):
+    url = f"https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro&titles={quote(term)}&redirects=1"
+    headers = {"User-Agent": "TrendsScraperBot/1.0 (you@example.com)"}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        page = next(iter(data["query"]["pages"].values()))
+        extract = page.get("extract", "").lower()
+
+        sport_match = re.search(r"(?:is|was)\s+(?:an?|the)?\s*(.*?)\s+(?:team|club|player|sport|franchise)", extract)
+        league_match = re.search(r"(?:plays|competes|participates).*?in\s+(?:the\s+)?([a-zA-Z0-9\s\-]+(?:league|division|series|tournament))", extract)
+
+        sport = sport_match.group(1).title() if sport_match else "Unknown"
+        league = league_match.group(1).title() if league_match else "Unknown"
+        return sport.strip(), league.strip()
+    except Exception:
+        return "Unknown", "Unknown"
+
 def main():
     sheet = connect_to_sheet("Trends")
     rows  = scrape_all_pages()
 
-    # ← **no** header row here, just your data
-    sheet.clear()
-    sheet.append_rows(rows, value_input_option="RAW")
-    print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
+    enriched_rows = []
+    for row in rows:
+        keyword = row[0]
+        sport, league = get_sport_league_from_wikipedia(keyword)
+        enriched_rows.append(row + [sport, league])
 
-if __name__=="__main__":
+    sheet.clear()
+    sheet.append_rows(enriched_rows, value_input_option="RAW")
+    print(f"✅ {len(enriched_rows)} total trends enriched and saved to Google Sheet")
+
+if __name__ == "__main__":
     main()
