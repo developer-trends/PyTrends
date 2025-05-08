@@ -27,70 +27,71 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
-def extract_sport_league(browser, title):
-    with browser.new_context() as context:
-        page = context.new_page()
-        try:
-            q = quote(title)
-            explore_url = (
-                "https://trends.google.com/trends/explore"
-                f"?q={q}&date=now%201-d&geo=KR&hl=en"
-            )
-            page.goto(explore_url, timeout=15000)
+def extract_sport_league_from_explore(browser, title):
+    explore_url = f"https://trends.google.com/trends/explore?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+    sport = league = ""
+
+    try:
+        with browser.new_context() as context:
+            page = context.new_page()
+            page.goto(explore_url, timeout=20000)
             page.wait_for_load_state("networkidle")
-            time.sleep(2)
+            time.sleep(1.5)
 
-            possible_text = page.locator("text=/sport|league/i").all_inner_texts()
-            joined = " ".join(possible_text).lower()
+            body_text = page.inner_text("body").lower()
 
-            sport = ""
-            league = ""
-
-            if "basketball" in joined:
-                sport = "Basketball"
-                league = "NBA" if "nba" in joined else ""
-            elif "soccer" in joined or "football" in joined:
+            if "soccer" in body_text or "football" in body_text:
                 sport = "Soccer"
-                if "premier league" in joined: league = "Premier League"
-                elif "la liga" in joined: league = "La Liga"
-                elif "ucl" in joined or "champions league" in joined: league = "Champions League"
-            elif "mma" in joined or "ufc" in joined:
+                if "premier league" in body_text:
+                    league = "Premier League"
+                elif "champions league" in body_text:
+                    league = "Champions League"
+                elif "k league" in body_text:
+                    league = "K League"
+            elif "basketball" in body_text:
+                sport = "Basketball"
+                league = "NBA" if "nba" in body_text else ""
+            elif "ufc" in body_text or "mma" in body_text:
                 sport = "MMA"
                 league = "UFC"
-            elif "baseball" in joined:
+            elif "baseball" in body_text:
                 sport = "Baseball"
-                league = "MLB"
-            elif "volleyball" in joined:
+                if "mlb" in body_text:
+                    league = "MLB"
+                elif "kbo" in body_text:
+                    league = "KBO"
+            elif "volleyball" in body_text:
                 sport = "Volleyball"
-            elif "esports" in joined:
+                league = "V-League" if "v-league" in body_text else ""
+            elif "e-sports" in body_text or "esports" in body_text:
                 sport = "E-Sports"
-            elif "boxing" in joined:
-                sport = "Boxing"
 
-            return sport, league
+    except Exception as e:
+        print(f"⚠️ Error parsing explore page for {title}: {e}")
 
-        except:
-            return "", ""
+    return sport, league, explore_url
 
 def extract_table_rows(page, browser):
     try:
-        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
+        page.wait_for_selector("table tbody tr", timeout=5000)
     except PlaywrightTimeoutError:
         return []
 
     rows = page.locator("table tbody tr")
     total = rows.count()
-    print(f"🔢 [table] found {total} rows – skipping the first one")
+    print(f"🔢 Found {total} rows")
 
     out = []
-    for i in range(1, total):
+    for i in range(1, total):  # Skip the header
         row = rows.nth(i)
-        if not row.is_visible(): continue
+        if not row.is_visible():
+            continue
 
         cells = row.locator("td")
-        if cells.count() < 5: continue
+        if cells.count() < 5:
+            continue
 
-        title  = cells.nth(1).inner_text().split("\n")[0].strip()
+        title = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
         raw = cells.nth(3).inner_text().split("\n")
@@ -113,19 +114,14 @@ def extract_table_rows(page, browser):
         spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
 
-        q = quote(title)
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=en"
-        )
+        sport, league, explore_url = extract_sport_league_from_explore(browser, title)
 
-        sport, league = extract_sport_league(browser, title)
-
-        # A B C D E F G H I J (col indexes)
         out.append([
-            title, volume, started, ended, explore_url, target_publish, breakdown,
+            title, volume, started, ended,
+            explore_url, target_publish, breakdown,
             "", sport, league
         ])
+
     return out
 
 def scrape_all_pages():
@@ -146,16 +142,17 @@ def scrape_all_pages():
             print(f"📄 Scraping page {page_num}")
             batch = extract_table_rows(page, browser)
             if not batch:
-                print("⚙️ fallback")
-            print(f"→ got {len(batch)} rows")
+                print("⚠️ No rows found")
+                break
+
             all_rows.extend(batch)
+            print(f"→ Collected {len(batch)} rows from page {page_num}")
 
             next_btn = page.get_by_role("button", name="Go to next page")
             if not next_btn.count() or next_btn.first.is_disabled():
-                print("✅ No more pages")
                 break
+            next_btn.first.scroll_into_view_if_needed()
             next_btn.first.click()
-            print("⏳ Waiting 3s")
             time.sleep(3)
             page_num += 1
 
@@ -167,7 +164,7 @@ def main():
     rows = scrape_all_pages()
     sheet.clear()
     sheet.append_rows(rows, value_input_option="RAW")
-    print(f"✅ {len(rows)} total trends saved to Google Sheet (cols A–J)")
+    print(f"✅ {len(rows)} rows saved to Google Sheet.")
 
 if __name__ == "__main__":
     main()
