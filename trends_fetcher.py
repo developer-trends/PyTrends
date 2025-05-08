@@ -55,43 +55,19 @@ def extract_table_rows(page):
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
 
-        # toggle = cells.nth(3).locator("div.vdw3Ld")
-        # target_publish = ended
-        # try:
-        #     toggle.click(); time.sleep(0.2)
-        #     raw2 = cells.nth(3).inner_text().split("\n")
-        #     p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-        #     if p2:
-        #         target_publish = p2[0].strip()
-        # finally:
-        #     try: toggle.click(); time.sleep(0.1)
-        #     except: pass
         toggle = cells.nth(3).locator("div.vdw3Ld")
-        target_publish = ""  # the clean timestamp
-
+        target_publish = ended
         try:
-            toggle.click()
-            page.wait_for_timeout(300)
-        
-            detail_lines = cells.nth(3).inner_text().split("\n")
-            date_line = next((l for l in detail_lines if "," in l and ("AM" in l or "PM" in l)), "")
-            if date_line:
-                target_publish = date_line.strip()
+            toggle.click(); time.sleep(0.2)
+            raw2 = cells.nth(3).inner_text().split("\n")
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            if p2:
+                target_publish = p2[0].strip()
         finally:
-            try: toggle.click()
+            try: toggle.click(); time.sleep(0.1)
             except: pass
-
-        spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
-
-        q = quote(title)
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=en"
-        )
-
-        # out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
-        out.append([title, volume, target_publish, ended, explore_url, target_publish, breakdown])
+        
+        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
 
 
         return out
