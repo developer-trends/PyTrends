@@ -32,34 +32,35 @@ def extract_table_rows(page):
         page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
     except PlaywrightTimeoutError:
         return []
+
     rows = page.locator("table tbody tr")
     total = rows.count()
     print(f"🔢 [table] found {total} rows – skipping the first one")
 
     out = []
+
     for i in range(1, total):
         row = rows.nth(i)
         if not row.is_visible(): continue
+
         cells = row.locator("td")
         if cells.count() < 5: continue
 
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        raw = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        raw   = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts) > 1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
-            toggle.click()
-            time.sleep(0.2)
+            toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
-            if p2:
-                target_publish = p2[0].strip()
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            if p2: target_publish = p2[0].strip()
         finally:
             try: toggle.click(); time.sleep(0.1)
             except: pass
@@ -73,28 +74,35 @@ def extract_table_rows(page):
             f"?q={q}&date=now%201-d&geo=KR&hl=en"
         )
 
-        # 🆕 Detect sport/league from explore page
-        with page.context.new_page() as new_tab:
-            try:
-                new_tab.goto(explore_url, timeout=10000)
-                new_tab.wait_for_selector("body", timeout=5000)
-                body_text = new_tab.inner_text("body")
-                known_tags = [
-                    "UEFA", "NBA", "MLB", "MMA", "LCK", "KBO", "UFC",
-                    "Champions League", "Premier League", "Serie A",
-                    "Bundesliga", "La Liga", "EPL", "J League", "K League"
-                ]
-                detected_tag = next((tag for tag in known_tags if tag.lower() in body_text.lower()), "N/A")
-            except Exception as e:
-                print(f"⚠️ Failed to extract league for {title}: {e}")
-                detected_tag = "N/A"
+        # ✅ Open new tab and extract category
+        context = page.context
+        with context.new_page() as tab:
+            tab.goto(explore_url, timeout=20000)
+            tab.wait_for_load_state("networkidle")
+            time.sleep(1.5)
 
+            try:
+                breadcrumb = tab.locator('text="Searches"').nth(0).evaluate("node => node.closest('nav')?.innerText")
+                sport, league = "Unknown", "Unknown"
+
+                if breadcrumb:
+                    items = breadcrumb.split("›")
+                    if len(items) > 1:
+                        sport = items[1].strip()
+                    if len(items) > 2:
+                        league = items[2].strip()
+            except:
+                sport, league = "Unknown", "Unknown"
+
+        # ✅ Append with Col I = sport, Col J = league
         out.append([
             title, volume, started, ended,
-            explore_url, target_publish, breakdown, detected_tag
+            explore_url, target_publish, breakdown,
+            sport, league
         ])
 
     return out
+
 
 def extract_card_rows(page):
     try:
