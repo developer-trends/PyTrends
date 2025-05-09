@@ -66,35 +66,14 @@ def get_entity_props(qid):
 def resolve_labels(qids):
     missing = [q for q in qids if q not in CACHE['qid_label']]
     if missing:
-        params = {
-            "action": "wbgetentities",
-            "ids": "|".join(missing),
-            "props": "labels",
-            "languages": "en,vi,th,ko,ja,zh",
-            "format": "json"
-        }
-        # var_dump equivalent for resp and data
+        params = {"action": "wbgetentities", "ids": "|".join(missing), "props": "labels", "languages": "en,vi,th,ko,ja,zh", "format": "json"}
         resp = wikidata_request(params)
-        print("--- resolve_labels VAR DUMP ---")
-        print("Request params:", params)
-        print("Response status_code:", resp.status_code)
-        try:
-            raw = resp.json()
-        except Exception as e:
-            print("JSON parse error:", e)
-            raw = {}
-        from pprint import pprint
-        print("Raw JSON:")
-        pprint(raw)
-        data = raw.get("entities", {})
-        print("Parsed entities data:")
-        pprint(data)
-        # populate cache
+        data = resp.json().get("entities", {})
         for qid, ent in data.items():
             lbls = ent.get("labels", {})
             label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
             CACHE['qid_label'][qid] = label
-    return [CACHE['qid_label'].get(q) for q in qids]['qid_label'].get(q) for q in qids]
+    return [CACHE['qid_label'].get(q) for q in qids]
 
 # --- ENRICHMENT LAYER ---
 def enrich_rows(rows):
