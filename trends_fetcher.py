@@ -94,16 +94,7 @@ def resolve_labels(qids):
             lbls = ent.get("labels", {})
             label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
             CACHE['qid_label'][qid] = label
-    return [CACHE['qid_label'].get(q) for q in qids]['qid_label'].get(q) for q in qids]
-    missing = [q for q in qids if q not in CACHE['qid_label']]
-    if missing:
-        params = {"action": "wbgetentities", "ids": "|".join(missing), "props": "labels", "languages": "en,vi,th,ko,ja,zh", "format": "json"}
-        resp = wikidata_request(params)
-        data = resp.json().get("entities", {})
-        for qid, ent in data.items():
-            lbls = ent.get("labels", {})
-            label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
-            CACHE['qid_label'][qid] = label
+    # return labels for all requested QIDs
     return [CACHE['qid_label'].get(q) for q in qids]
 
 # --- WIKIPEDIA INFOBOX FALLBACK ---
