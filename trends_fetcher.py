@@ -114,27 +114,31 @@ def scrape_infobox(title):
         if ('league' in k or 'competition' in k) and not league: league = v
     return sport, league
 
-# --- ENRICHMENT (BATCHED) ---
+# --- ENRICHMENT LAYER ---
 def enrich_rows(rows):
+    """
+    For each row, lookup sport and league, append them in cols H and I.
+    """
     enriched = []
     for row in rows:
         title = row[0]
         lang = detect(title)
-        qid = lookup_qid(title, lang=lang)
+        qid = lookup_qid(title, lang=lang) or lookup_qid(title, lang="en")
         sport = league = None
         if qid:
             props = get_entity_props(qid)
-            if props["sports"]:
+            if props.get("sports"):
                 sport = resolve_labels(props["sports"])[0]
-            if props["leagues"]:
+            if props.get("leagues"):
                 league = resolve_labels(props["leagues"])[0]
-        # Append only sport and league (cols H and I)
+        # fallback to Wikipedia infobox if missing
+        if not sport or not league:
+            fb_s, fb_l = scrape_infobox(title)
+            sport = sport or fb_s
+            league = league or fb_l
         enriched.append(row + [sport, league])
-
     save_cache()
     return enriched
-    return enriched
-
 # --- SCRAPERS & GOOGLE SHEETS SETUP ---
 
 def connect_to_sheet(sheet_name):
