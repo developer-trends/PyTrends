@@ -33,7 +33,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # pip install pandas gspread oauth2client playwright
-          pip install pandas gspread oauth2client playwright requests langdetect
+          pip install pandas gspread oauth2client playwright requests langdetect beautifulsoup4
 
       - name: Install Chromium libraries
         run: |
