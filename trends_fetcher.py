@@ -122,10 +122,8 @@ def extract_table_rows(page):
         cells = r.locator("td")
         if cells.count() < 5:
             continue
-        title = cells.nth(1).inner_text().split("
-")[0].strip()
-        vol   = cells.nth(2).inner_text().split("
-")[0].strip()
+        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        vol   = cells.nth(2).inner_text().split("\n")[0].strip()
         raw   = cells.nth(3).inner_text().split("
 ")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
