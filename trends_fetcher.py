@@ -47,7 +47,11 @@ def get_qid(title, lang='en'):
     if key in CACHE['qids']:
         return CACHE['qids'][key]
     data = _wikidata_request({"action":"wbsearchentities", "search":title, "language":lang, "format":"json"})
-    qid = data.get('search', [{}])[0].get('id')
+    results = data.get('search', [])
+    if results:
+        qid = results[0].get('id')
+    else:
+        qid = None
     CACHE['qids'][key] = qid
     return qid
 
