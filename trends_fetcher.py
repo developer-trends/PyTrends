@@ -193,6 +193,10 @@ def scrape_all_pages():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox","--disable-setuid-sandbox"])
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
+        try:
+            page.wait_for_load_state("networkidle")
+        except PlaywrightTimeoutError:
+            print("⚠️ Initial load 'networkidle' timeout, continuing anyway")
         page.wait_for_load_state("networkidle")
         print("First page loaded")
         dismiss_cookie_banner(page)
