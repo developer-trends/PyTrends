@@ -3,6 +3,7 @@ import os
 import json
 import time
 import requests
+from requests.exceptions import HTTPError
 from langdetect import detect
 from urllib.parse import quote
 import gspread
@@ -21,9 +22,25 @@ def save_cache():
     with open(CACHE_FILE, "w") as f:
         json.dump(CACHE, f)
 
-# --- WIKIDATA UTILITIES ---
+# --- WIKIDATA BACKOFF HELPER ---
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 
+def wikidata_request(params):
+    backoff = 1
+    while True:
+        resp = requests.get(WIKIDATA_API, params=params)
+        if resp.status_code == 429:
+            print(f"⚠️ Rate limited, sleeping {backoff}s…")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+            continue
+        try:
+            resp.raise_for_status()
+        except HTTPError:
+            raise
+        return resp
+
+# --- WIKIDATA UTILITIES ---
 def lookup_qid(term, lang="en"):
     """Search Wikidata for `term` in language `lang` → QID."""
     cache_key = f"{lang}:{term}"
@@ -35,8 +52,7 @@ def lookup_qid(term, lang="en"):
         "language": lang,
         "format": "json"
     }
-    resp = requests.get(WIKIDATA_API, params=params)
-    resp.raise_for_status()
+    resp = wikidata_request(params)
     results = resp.json().get("search", [])
     qid = results[0]["id"] if results else None
     CACHE['term_to_qid'][cache_key] = qid
@@ -54,8 +70,7 @@ def get_entity_props(qid):
         "props": "claims",
         "format": "json"
     }
-    resp = requests.get(WIKIDATA_API, params=params)
-    resp.raise_for_status()
+    resp = wikidata_request(params)
     claims = resp.json()["entities"][qid]["claims"]
 
     def extract(pid):
@@ -82,26 +97,23 @@ def resolve_labels(qids):
             "action": "wbgetentities",
             "ids": "|".join(missing),
             "props": "labels",
-            "languages": "en,vi,th,ko,ja,zh",  # request all likely langs
+            "languages": "en,vi,th,ko,ja,zh",
             "format": "json"
         }
-        resp = requests.get(WIKIDATA_API, params=params)
-        resp.raise_for_status()
+        resp = wikidata_request(params)
         data = resp.json().get("entities", {})
         for qid, ent in data.items():
             lbls = ent.get("labels", {})
-            # pick English first, else the first available
             label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
             CACHE['qid_label'][qid] = label
     return [CACHE['qid_label'].get(q) for q in qids]
 
 # --- ENRICHMENT LAYER ---
-
 def enrich_rows(rows):
     enriched = []
     for row in rows:
         title = row[0]
-        lang = detect(title)  # auto-detect language
+        lang = detect(title)
         qid = lookup_qid(title, lang=lang)
         sport = league = team = None
         if qid:
@@ -118,7 +130,6 @@ def enrich_rows(rows):
     return enriched
 
 # --- GOOGLE SHEETS SETUP ---
-
 def connect_to_sheet(sheet_name):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -130,7 +141,6 @@ def connect_to_sheet(sheet_name):
     return client.open(sheet_name).get_worksheet(0)
 
 # --- PLAYWRIGHT SCRAPERS ---
-
 def dismiss_cookie_banner(page):
     for label in ("Accept all", "I agree", "AGREE"):
         try:
@@ -154,10 +164,10 @@ def extract_table_rows(page):
     out = []
     for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible(): 
+        if not row.is_visible():
             continue
         cells = row.locator("td")
-        if cells.count() < 5: 
+        if cells.count() < 5:
             continue
 
         title  = cells.nth(1).inner_text().split("\n")[0].strip()
@@ -266,7 +276,6 @@ def scrape_all_pages():
     return all_rows
 
 # --- MAIN ENTRYPOINT ---
-
 def main():
     sheet = connect_to_sheet("Trends")
     rows  = scrape_all_pages()
