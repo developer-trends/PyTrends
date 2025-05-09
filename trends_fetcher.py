@@ -106,8 +106,37 @@ def enrich_rows(rows):
     save_cache()
     return enriched
 
-# --- SCRAPER & PARSERS (unchanged) ---
-# ... (keep your extract_table_rows, extract_card_rows, scrape_all_pages here) ...
+# --- SCRAPER & PARSERS ---
+def extract_table_rows(page):
+    try:
+        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
+    except PlaywrightTimeoutError:
+        return []
+    rows = page.locator("table tbody tr")
+    total = rows.count()
+    out = []
+    for i in range(1, total):
+        r = rows.nth(i)
+        if not r.is_visible():
+            continue
+        cells = r.locator("td")
+        if cells.count() < 5:
+            continue
+        title = cells.nth(1).inner_text().split("
+")[0].strip()
+        vol   = cells.nth(2).inner_text().split("
+")[0].strip()
+        raw   = cells.nth(3).inner_text().split("
+")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        start = parts[0].strip() if parts else ""
+        end   = parts[1].strip() if len(parts)>1 else ""
+        url   = f"https://trends.google.com/trends/explore?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+        breakdown = ", ".join(cells.nth(4).locator("span").all_inner_texts())
+        out.append([title, vol, start, end, url, breakdown])
+    return out
+
+
 
 # --- MAIN ---
 def main():
