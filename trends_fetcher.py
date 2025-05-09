@@ -138,7 +138,20 @@ def enrich_rows(rows):
     save_cache()
     return enriched
 
-# --- SCRAPERS (UNCHANGED) ---
+# --- SCRAPERS & GOOGLE SHEETS SETUP ---
+
+def connect_to_sheet(sheet_name):
+    """Authorize and return the first worksheet of the given sheet."""
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client.open(sheet_name).sheet1
+
+# --- SCRAPERS --- (UNCHANGED) ---
 # extract_table_rows, extract_card_rows, scrape_all_pages
 
 # --- MAIN ---
