@@ -220,4 +220,4 @@ def extract_card_rows(page):
                 toggle.click(); time.sleep(0.1)
             except:
                 pass
-        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d,\
+                spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
