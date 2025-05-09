@@ -193,27 +193,36 @@ def scrape_all_pages():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox","--disable-setuid-sandbox"])
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
+        # Instead of waiting for networkidle, wait for either table or cards to appear
         try:
-            page.wait_for_load_state("networkidle")
+            page.wait_for_selector("table tbody tr", timeout=10000)
         except PlaywrightTimeoutError:
-            print("⚠️ Initial load 'networkidle' timeout, continuing anyway")
-        page.wait_for_load_state("networkidle")
-        print("First page loaded")
+            try:
+                page.wait_for_selector("div.mZ3RIc", timeout=10000)
+            except PlaywrightTimeoutError:
+                print("⚠️ Neither table nor cards appeared; proceeding anyway")
+        print("First page ready for scraping")
         dismiss_cookie_banner(page)
+
         page_num = 1
         while True:
             print(f"📄 Scraping page {page_num}")
-            batch = extract_table_rows(page) or extract_card_rows(page)
+            # scrape whichever layout is present
+            batch = extract_table_rows(page)
+            if not batch:
+                batch = extract_card_rows(page)
             print(f"  → got {len(batch)} rows")
             all_rows.extend(batch)
+
             next_btn = page.get_by_role("button", name="Go to next page")
             if not next_btn.count() or next_btn.first.is_disabled():
                 print("No more pages")
                 break
+
             next_btn.first.scroll_into_view_if_needed()
             next_btn.first.click()
-            print("waiting 3 s…")
-            time.sleep(3)
+            # wait for new content rows to load
+            time.sleep(2)
             page_num += 1
         browser.close()
     return all_rows
