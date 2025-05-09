@@ -66,6 +66,37 @@ def get_entity_props(qid):
 def resolve_labels(qids):
     missing = [q for q in qids if q not in CACHE['qid_label']]
     if missing:
+        params = {
+            "action": "wbgetentities",
+            "ids": "|".join(missing),
+            "props": "labels",
+            "languages": "en,vi,th,ko,ja,zh",
+            "format": "json"
+        }
+        # var_dump equivalent for resp and data
+        resp = wikidata_request(params)
+        print("--- resolve_labels VAR DUMP ---")
+        print("Request params:", params)
+        print("Response status_code:", resp.status_code)
+        try:
+            raw = resp.json()
+        except Exception as e:
+            print("JSON parse error:", e)
+            raw = {}
+        from pprint import pprint
+        print("Raw JSON:")
+        pprint(raw)
+        data = raw.get("entities", {})
+        print("Parsed entities data:")
+        pprint(data)
+        # populate cache
+        for qid, ent in data.items():
+            lbls = ent.get("labels", {})
+            label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
+            CACHE['qid_label'][qid] = label
+    return [CACHE['qid_label'].get(q) for q in qids]['qid_label'].get(q) for q in qids]
+    missing = [q for q in qids if q not in CACHE['qid_label']]
+    if missing:
         params = {"action": "wbgetentities", "ids": "|".join(missing), "props": "labels", "languages": "en,vi,th,ko,ja,zh", "format": "json"}
         resp = wikidata_request(params)
         data = resp.json().get("entities", {})
@@ -74,6 +105,37 @@ def resolve_labels(qids):
             label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
             CACHE['qid_label'][qid] = label
     return [CACHE['qid_label'].get(q) for q in qids]
+
+# --- WIKIPEDIA INFOBOX FALLBACK ---
+def fetch_infobox_data(title):
+    """
+    Fallback: scrape Wikipedia page infobox for sport/league fields.
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    url_title = title.replace(' ', '_')
+    url = f"https://en.wikipedia.org/wiki/{url_title}"
+    try:
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+    except:
+        return {}, {}
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    info = soup.find('table', class_='infobox')
+    sport = league = None
+    if info:
+        for row in info.find_all('tr'):
+            th = row.find('th')
+            td = row.find('td')
+            if not th or not td:
+                continue
+            key = th.get_text(strip=True).lower()
+            val = td.get_text(strip=True)
+            if 'sport' in key and not sport:
+                sport = val
+            if 'league' in key or 'competition' in key and not league:
+                league = val
+    return sport, league
 
 # --- ENRICHMENT LAYER ---
 def enrich_rows(rows):
@@ -89,6 +151,11 @@ def enrich_rows(rows):
                 sport = resolve_labels(props["sports"])[0]
             if props["leagues"]:
                 league = resolve_labels(props["leagues"])[0]
+        # fallback if still missing
+        if not sport or not league:
+            fx_s, fx_l = fetch_infobox_data(title)
+            sport = sport or fx_s
+            league = league or fx_l
         enriched.append(row + [sport, league])
     save_cache()
     return enriched
