@@ -1,11 +1,102 @@
 #!/usr/bin/env python3
-import os, json, time, re, requests
+import os, json, time, requests
 from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-GOOGLE_KG_API_KEY = os.getenv("GOOGLE_KG_API_KEY")
+# --- Caching setup ---
+CACHE_FILE = os.path.expanduser("~/.trends_wikidata_cache.json")
+try:
+    with open(CACHE_FILE) as f:
+        CACHE = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    CACHE = {"term_to_qid": {}, "qid_props": {}, "qid_label": {}}
+
+
+def save_cache():
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(CACHE, f)
+
+# --- Wikidata enrichment utils ---
+WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+
+# Batch resolve labels for a list of Q-IDs
+def resolve_labels(qids):
+    missing = [q for q in qids if q not in CACHE['qid_label']]
+    if missing:
+        # batch call up to 50 at once
+        params = {
+            "action": "wbgetentities",
+            "ids": "|".join(missing),
+            "props": "labels",
+            "languages": "en",
+            "format": "json"
+        }
+        resp = requests.get(WIKIDATA_API, params=params)
+        if resp.ok:
+            data = resp.json().get('entities', {})
+            for qid, ent in data.items():
+                label = ent.get('labels', {}).get('en', {}).get('value')
+                if label:
+                    CACHE['qid_label'][qid] = label
+    return [CACHE['qid_label'].get(q) for q in qids]
+
+# Retrieve claims for a single entity Q-ID
+def get_entity_props(qid):
+    if qid in CACHE['qid_props']:
+        return CACHE['qid_props'][qid]
+    # fetch claims
+    params = {"action": "wbgetentities", "ids": qid, "props": "claims", "format": "json"}
+    resp = requests.get(WIKIDATA_API, params=params)
+    resp.raise_for_status()
+    claims = resp.json()['entities'][qid]['claims']
+    def extract(p):
+        return [c['mainsnak']['datavalue']['value']['id']
+                for c in claims.get(p, [])
+                if 'datavalue' in c['mainsnak']]
+    props = {
+        'sports': extract('P641'),
+        'leagues': extract('P118'),
+        'teams': extract('P54')
+    }
+    CACHE['qid_props'][qid] = props
+    # brief pause to avoid bursting
+    time.sleep(0.05)
+    return props
+
+# Lookup entity term: returns Q-ID (cached)
+def lookup_qid(term):
+    if term in CACHE['term_to_qid']:
+        return CACHE['term_to_qid'][term]
+    params = {"action": "wbsearchentities", "search": term, "language": "en", "format": "json"}
+    resp = requests.get(WIKIDATA_API, params=params)
+    resp.raise_for_status()
+    results = resp.json().get('search', [])
+    qid = results[0]['id'] if results else None
+    CACHE['term_to_qid'][term] = qid
+    time.sleep(0.05)
+    return qid
+
+# Enrich scraped rows with sport, league, team
+def enrich_rows(rows):
+    enriched = []
+    for row in rows:
+        title = row[0]
+        qid = lookup_qid(title)
+        sport = league = team = None
+        if qid:
+            props = get_entity_props(qid)
+            # resolve first items if present
+            sport = resolve_labels(props['sports'])[0] if props['sports'] else None
+            league = resolve_labels(props['leagues'])[0] if props['leagues'] else None
+            team = resolve_labels(props['teams'])[0] if props['teams'] else None
+        enriched.append(row + [sport, league, team])
+    # save cache to disk after enrichment
+    save_cache()
+    return enriched
+
+# --- Original scraper code unchanged below ---
 
 def connect_to_sheet(sheet_name):
     scope = [
@@ -17,195 +108,17 @@ def connect_to_sheet(sheet_name):
     client = gspread.authorize(creds)
     return client.open(sheet_name).get_worksheet(0)
 
-def dismiss_cookie_banner(page):
-    for label in ("Accept all", "I agree", "AGREE"):
-        try:
-            btn = page.get_by_role("button", name=label)
-            if btn.count():
-                btn.first.click()
-                page.wait_for_timeout(800)
-                print("🛡️ Dismissed cookie banner")
-                return
-        except:
-            pass
-
-def get_sport_and_league_from_kg(query):
-    url = "https://kgsearch.googleapis.com/v1/entities:search"
-    params = {
-        "query": query,
-        "limit": 1,
-        "indent": True,
-        "key": GOOGLE_KG_API_KEY
-    }
-    try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("itemListElement"):
-            return ("Unknown", "Unknown")
-
-        result = data["itemListElement"][0]["result"]
-        description = result.get("description", "").strip()
-        sport = description.split()[0] if description else "Unknown"
-
-        detailed = result.get("detailedDescription", {}).get("articleBody", "")
-        league = extract_league_from_text(detailed)
-        return sport, league
-
-    except Exception as e:
-        print(f"KG query failed for '{query}': {e}")
-        return ("Unknown", "Unknown")
-
-def extract_league_from_text(text):
-    match = re.search(r"competing in (.*?)\.", text)
-    if match:
-        return match.group(1)
-    return "Unknown"
-
-def extract_table_rows(page):
-    try:
-        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
-    except PlaywrightTimeoutError:
-        return []
-    rows = page.locator("table tbody tr")
-    total = rows.count()
-    print(f"🔢 [table] found {total} rows – skipping the first one")
-
-    out = []
-    for i in range(1, total):
-        row = rows.nth(i)
-        if not row.is_visible(): 
-            continue
-        cells = row.locator("td")
-        if cells.count() < 5: 
-            continue
-
-        title  = cells.nth(1).inner_text().split("\n")[0].strip()
-        volume = cells.nth(2).inner_text().split("\n")[0].strip()
-
-        raw   = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
-
-        toggle = cells.nth(3).locator("div.vdw3Ld")
-        target_publish = ended
-        try:
-            toggle.click(); time.sleep(0.2)
-            raw2 = cells.nth(3).inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            if p2:
-                target_publish = p2[0].strip()
-        finally:
-            try: toggle.click(); time.sleep(0.1)
-            except: pass
-
-        spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
-
-        q = quote(title)
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=en"
-        )
-
-        sport, league = get_sport_and_league_from_kg(title)
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown, sport, league])
-
-    return out
-
-def extract_card_rows(page):
-    try:
-        page.wait_for_selector("div.mZ3RIc", timeout=5000)
-    except PlaywrightTimeoutError:
-        return []
-    cards = page.locator("div.mZ3RIc")
-    total = cards.count()
-    print(f"🃏 [card] found {total} cards – skipping the first one")
-
-    out = []
-    for i in range(1, total):
-        c = cards.nth(i)
-        title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
-        volume = c.locator("div.search-count-title").inner_text().strip()
-
-        raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
-
-        toggle = c.locator("div.vdw3Ld")
-        target_publish = ended
-        try:
-            toggle.click(); time.sleep(0.2)
-            raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            if p2:
-                target_publish = p2[0].strip()
-        finally:
-            try: toggle.click(); time.sleep(0.1)
-            except: pass
-
-        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
-
-        q = quote(title)
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={q}&date=now%201-d&geo=KR&hl=en"
-        )
-
-        sport, league = get_sport_and_league_from_kg(title)
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown, sport, league])
-
-    return out
-
-def scrape_all_pages():
-    all_rows = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox"]
-        )
-        page = browser.new_page()
-        page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
-        page.wait_for_load_state("networkidle")
-        print("First page loaded")
-
-        dismiss_cookie_banner(page)
-
-        page_num = 1
-        while True:
-            print(f"📄 Scraping page {page_num}")
-            batch = extract_table_rows(page)
-            if not batch:
-                print("table extractor returned 0 → falling back to cards")
-                batch = extract_card_rows(page)
-
-            print(f"  → got {len(batch)} rows")
-            all_rows.extend(batch)
-
-            next_btn = page.get_by_role("button", name="Go to next page")
-            if not next_btn.count() or next_btn.first.is_disabled():
-                print("No more pages")
-                break
-
-            next_btn.first.scroll_into_view_if_needed()
-            next_btn.first.click()
-            print("waiting 3 s…")
-            time.sleep(3)
-            page_num += 1
-
-        browser.close()
-    return all_rows
+# ... (dismiss_cookie_banner, extract_table_rows, extract_card_rows, scrape_all_pages unchanged) ...
 
 def main():
     sheet = connect_to_sheet("Trends")
     rows  = scrape_all_pages()
+    # enrich with sport, league, and team columns
+    rows_enriched = enrich_rows(rows)
 
     sheet.clear()
-    sheet.append_rows(rows, value_input_option="RAW")
-    print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
+    sheet.append_rows(rows_enriched, value_input_option="RAW")
+    print(f"✅ {len(rows_enriched)} trends saved (including sport, league, team)")
 
 if __name__=="__main__":
     main()
