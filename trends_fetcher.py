@@ -110,7 +110,7 @@ def fetch_infobox_data(title):
         resp = requests.get(url, timeout=5)
         resp.raise_for_status()
     except:
-        return {}, {}
+        return None, None
     soup = BeautifulSoup(resp.text, 'html.parser')
     info = soup.find('table', class_='infobox')
     sport = league = None
@@ -124,7 +124,7 @@ def fetch_infobox_data(title):
             val = td.get_text(strip=True)
             if 'sport' in key and not sport:
                 sport = val
-            if 'league' in key or 'competition' in key and not league:
+            if ('league' in key or 'competition' in key) and not league:
                 league = val
     return sport, league
 
