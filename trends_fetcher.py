@@ -30,7 +30,6 @@ def wikidata_request(params):
     while True:
         resp = requests.get(WIKIDATA_API, params=params)
         if resp.status_code == 429:
-            print(f"⚠️ Rate limited, sleeping {backoff}s…")
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
             continue
@@ -73,35 +72,16 @@ def resolve_labels(qids):
             "languages": "en,vi,th,ko,ja,zh",
             "format": "json"
         }
-        # var_dump equivalent for resp and data
         resp = wikidata_request(params)
-        print("--- resolve_labels VAR DUMP ---")
-        print("Request params:", params)
-        print("Response status_code:", resp.status_code)
-        try:
-            raw = resp.json()
-        except Exception as e:
-            print("JSON parse error:", e)
-            raw = {}
-        from pprint import pprint
-        print("Raw JSON:")
-        pprint(raw)
-        data = raw.get("entities", {})
-        print("Parsed entities data:")
-        pprint(data)
-        # populate cache
+        data = resp.json().get("entities", {})
         for qid, ent in data.items():
             lbls = ent.get("labels", {})
             label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
             CACHE['qid_label'][qid] = label
-    # return labels for all requested QIDs
     return [CACHE['qid_label'].get(q) for q in qids]
 
 # --- WIKIPEDIA INFOBOX FALLBACK ---
 def fetch_infobox_data(title):
-    """
-    Fallback: scrape Wikipedia page infobox for sport/league fields.
-    """
     import requests
     from bs4 import BeautifulSoup
     url_title = title.replace(' ', '_')
@@ -142,7 +122,6 @@ def enrich_rows(rows):
                 sport = resolve_labels(props["sports"])[0]
             if props["leagues"]:
                 league = resolve_labels(props["leagues"])[0]
-        # fallback if still missing
         if not sport or not league:
             fx_s, fx_l = fetch_infobox_data(title)
             sport = sport or fx_s
@@ -167,7 +146,6 @@ def dismiss_cookie_banner(page):
             if btn.count():
                 btn.first.click()
                 page.wait_for_timeout(800)
-                print("🛡️ Dismissed cookie banner")
                 return
         except:
             pass
@@ -179,7 +157,6 @@ def extract_table_rows(page):
         return []
     rows = page.locator("table tbody tr")
     total = rows.count()
-    print(f"🔢 [table] found {total} rows – including all rows")
     out = []
     for i in range(total):
         row = rows.nth(i)
@@ -200,10 +177,13 @@ def extract_table_rows(page):
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
             p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            if p2: target_publish = p2[0].strip()
+            if p2:
+                target_publish = p2[0].strip()
         finally:
-            try: toggle.click(); time.sleep(0.1)
-            except: pass
+            try:
+                toggle.click(); time.sleep(0.1)
+            except:
+                pass
         spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
         breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
         q = quote(title)
@@ -218,7 +198,6 @@ def extract_card_rows(page):
         return []
     cards = page.locator("div.mZ3RIc")
     total = cards.count()
-    print(f"🃏 [card] found {total} cards – including all cards")
     out = []
     for i in range(total):
         c = cards.nth(i)
@@ -234,65 +213,11 @@ def extract_card_rows(page):
             toggle.click(); time.sleep(0.2)
             raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
             p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
-            if p2: target_publish = p2[0].strip()
+            if p2:
+                target_publish = p2[0].strip()
         finally:
-            try: toggle.click(); time.sleep(0.1)
-            except: pass
-        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in spans.all_inner_texts() if s.strip())
-        q = quote(title)
-        explore_url = ("https://trends.google.com/trends/explore" f"?q={q}&date=now%201-d&geo=KR&hl=en")
-        out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
-    return out
-
-def scrape_all_pages():
-    all_rows = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox","--disable-setuid-sandbox"])
-        page = browser.new_page()
-        page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
-        # Instead of waiting for networkidle, wait for either table or cards to appear
-        try:
-            page.wait_for_selector("table tbody tr", timeout=10000)
-        except PlaywrightTimeoutError:
             try:
-                page.wait_for_selector("div.mZ3RIc", timeout=10000)
-            except PlaywrightTimeoutError:
-                print("⚠️ Neither table nor cards appeared; proceeding anyway")
-        print("First page ready for scraping")
-        dismiss_cookie_banner(page)
-
-        page_num = 1
-        while True:
-            print(f"📄 Scraping page {page_num}")
-            # scrape whichever layout is present
-            batch = extract_table_rows(page)
-            if not batch:
-                batch = extract_card_rows(page)
-            print(f"  → got {len(batch)} rows")
-            all_rows.extend(batch)
-
-            next_btn = page.get_by_role("button", name="Go to next page")
-            if not next_btn.count() or next_btn.first.is_disabled():
-                print("No more pages")
-                break
-
-            next_btn.first.scroll_into_view_if_needed()
-            next_btn.first.click()
-            # wait for new content rows to load
-            time.sleep(2)
-            page_num += 1
-        browser.close()
-    return all_rows
-
-# --- MAIN ENTRYPOINT ---
-def main():
-    sheet = connect_to_sheet("Trends")
-    rows = scrape_all_pages()
-    enriched = enrich_rows(rows)
-    sheet.clear()
-    sheet.append_rows(enriched, value_input_option="RAW")
-    print(f"✅ {len(enriched)} trends saved to sheet (sport → Col H, league → Col I)")
-
-if __name__ == "__main__":
-    main()
+                toggle.click(); time.sleep(0.1)
+            except:
+                pass
+        spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d,\
