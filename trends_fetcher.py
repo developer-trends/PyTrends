@@ -156,14 +156,23 @@ def extract_rows(rows):
     return out
 
 def extract_cards(page):
+    cards = page.locator('div.mZ3RIc')
+    count = cards.count()
+    if count == 0:
+        return []
     out = []
-    for c in page.locator('div.mZ3RIc').all():
-        title = c.locator('span.mUIrbf-vQzf8d').inner_text()
-        volume = c.locator('div.search-count-title').inner_text()
-        started, ended = parse_times(c.locator('div.vdw3Ld').inner_text())
-        url = make_explore_url(title)
-        breakdown = parse_breakdown(c.locator('div.lqv0Cb'))
-        out.append([title, volume, started, ended, url, breakdown])
+    for i in range(count):
+        c = cards.nth(i)
+        try:
+            title = c.locator('span.mUIrbf-vQzf8d').inner_text(timeout=5000)
+            volume = c.locator('div.search-count-title').inner_text(timeout=5000)
+            started, ended = parse_times(c.locator('div.vdw3Ld').inner_text(timeout=3000))
+            url = make_explore_url(title)
+            breakdown = parse_breakdown(c.locator('div.lqv0Cb'))
+            out.append([title, volume, started, ended, url, breakdown])
+        except PlaywrightTimeoutError:
+            # Skip cards that don't match expected format
+            continue
     return out
 
 # --- HELPERS ---
