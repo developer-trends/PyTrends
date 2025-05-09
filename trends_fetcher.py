@@ -121,19 +121,28 @@ def scrape_trends(geo='KR', category=17, hl='en'):
     with sync_playwright() as p:
         page = p.chromium.launch().new_page()
         page.goto(base, timeout=60000)
-        # wait for content
-        page.wait_for_selector("table tbody tr, div.mZ3RIc", timeout=10000)
-        page_num = 1
+        # Determine layout once per page
+        is_table = False
+        try:
+            if page.locator('table tbody tr').count() > 0:
+                is_table = True
+        except:
+            is_table = False
+        page.wait_for_timeout(2000)
         while True:
-            locator = page.locator("table tbody tr")
-            batch = extract_rows(locator) or extract_cards(page)
+            if is_table:
+                batch = extract_rows(page.locator('table tbody tr'))
+            else:
+                batch = extract_cards(page)
             rows.extend(batch)
+            # Next page
             btn = page.get_by_role('button', name='Go to next page')
             if not btn.count() or btn.first.is_disabled():
                 break
             btn.first.click()
             page.wait_for_timeout(2000)
-            page_num += 1
+            # re-check layout
+            is_table = page.locator('table tbody tr').count() > 0
         page.context.close()
     return rows
 
@@ -156,23 +165,23 @@ def extract_rows(rows):
     return out
 
 def extract_cards(page):
-    cards = page.locator('div.mZ3RIc')
-    count = cards.count()
-    if count == 0:
+    # direct element handles to avoid repeated locators
+    cards = page.locator('div.mZ3RIc').all()
+    if not cards:
         return []
     out = []
-    for i in range(count):
-        c = cards.nth(i)
-        try:
-            title = c.locator('span.mUIrbf-vQzf8d').inner_text(timeout=5000)
-            volume = c.locator('div.search-count-title').inner_text(timeout=5000)
-            started, ended = parse_times(c.locator('div.vdw3Ld').inner_text(timeout=3000))
-            url = make_explore_url(title)
-            breakdown = parse_breakdown(c.locator('div.lqv0Cb'))
-            out.append([title, volume, started, ended, url, breakdown])
-        except PlaywrightTimeoutError:
-            # Skip cards that don't match expected format
-            continue
+    for c in cards:
+        # get full text block and split lines
+        text = c.inner_text(timeout=3000)
+        parts = [l.strip() for l in text.split() if l.strip()]
+        # assume first line is title, second is volume
+        title = parts[0]
+        volume = parts[1] if len(parts) > 1 else ''
+        # parse times and breakdown by locating spans quickly
+        started, ended = parse_times(text)
+        url = make_explore_url(title)
+        breakdown = parse_breakdown(c)
+        out.append([title, volume, started, ended, url, breakdown])
     return out
 
 # --- HELPERS ---
