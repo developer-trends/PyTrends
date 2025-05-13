@@ -82,7 +82,7 @@ def extract_table_rows(page):
                 .locator("span.mUIrbf-vQzf8d, span.Gwdjic")
                 .all_inner_texts() if s.strip()
         )
-        out.append([title, volume, started, target_publish, explore_url, volume, breakdown])
+        out.append([title, volume, started, target_publish, explore_url, toggle, breakdown])
     return out
 
 
