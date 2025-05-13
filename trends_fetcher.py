@@ -3,11 +3,13 @@ import os
 import json
 from json import JSONDecodeError
 import time
+import re
 from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from openai import OpenAI
+from deep_translator import GoogleTranslator
 
 # --- CONFIGURATION ---
 client = OpenAI(api_key=os.environ.get("GPT_AI"))
@@ -162,35 +164,43 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION: SPORT ONLY (with DEBUG) ---
+# --- GPT CLASSIFICATION WITH TRANSLATION ---
+def translate_title(text):
+    try:
+        cleaned = re.sub(r"[^\w\s가-힣一-龯ぁ-ゔァ-ヴー々〆〤]", "", text).strip()
+        translated = GoogleTranslator(source='auto', target='en').translate(cleaned)
+        return translated
+    except Exception as e:
+        print(f"⚠️ Translation failed for '{text}': {e}")
+        return text
+
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
 
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
-            
-            user_prompt = (
-                "You will be given a list of Google Trends titles. "
-                "Each title may refer to a team, athlete, coach, stadium, tournament, or sports event. "
-                "Your task is to identify the most likely Sport associated with each title. "
-                "Examples of sports: Soccer, Basketball, American Football, Baseball, Cricket, MMA, Boxing, Tennis, Golf, Formula 1, Cycling, Esports, Olympics, etc. "
-                "If a title is clearly unrelated to any sport, respond with: {\"sport\": \"Not a sport\"}.\n\n"
-                "Use your best judgment for ambiguous names based on real-world relevance. "
-                "Respond ONLY with valid JSON as an array, like:\n"
-                "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Not a sport\"}]\n\n"
-                "Titles:\n" + json.dumps(batch, ensure_ascii=False)
-            )
+        translated_batch = [translate_title(title) for title in batch]
 
+        user_prompt = (
+            "You will be given a list of Google Trends titles. "
+            "Each title may refer to a team, athlete, coach, stadium, tournament, or sports event. "
+            "Your task is to identify the most likely Sport associated with each title. "
+            "Examples of sports: Soccer, Basketball, American Football, Baseball, Cricket, MMA, Boxing, Tennis, Golf, Formula 1, Cycling, Esports, Olympics, etc. "
+            "If a title is clearly unrelated to any sport, respond with: {\"sport\": \"Not a sport\"}.\n\n"
+            "Use your best judgment for ambiguous names based on real-world relevance. "
+            "Respond ONLY with valid JSON as an array, like:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Not a sport\"}]\n\n"
+            "Titles:\n" + json.dumps(translated_batch, ensure_ascii=False)
+        )
 
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": user_prompt}],
-                temperature=0
+                temperature=0.5
             )
             text = resp.choices[0].message.content.strip()
 
-            # 🔍 Debug the raw response
             print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
 
             if "```" in text:
@@ -202,6 +212,7 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             try:
                 parsed = json.loads(json_str)
             except JSONDecodeError:
+                print("⚠️ JSON parse error, using fallback 'Unknown'")
                 parsed = []
 
             aligned = []
@@ -232,7 +243,7 @@ def main():
     enriched = [row + [info.get('sport', '')] for row, info in zip(rows, classified)]
     sheet.clear()
     sheet.append_rows(enriched, value_input_option="RAW")
-    print(f"✅ Wrote {len(enriched)} rows (Sport⇢Col H)")
+    print(f"✅ Wrote {len(enriched)} rows (Sport➞Col H)")
 
 if __name__ == "__main__":
     main()
