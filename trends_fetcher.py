@@ -170,10 +170,12 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
 
         user_prompt = (
             "You will be given a list of Google Trends titles. "
-            "For each title, identify the most likely Sport and the League it belongs to. "
-            "If it's not sports-related, return 'Not a sport' for sport and 'N/A' for league.\n\n"
-            "Return ONLY a valid JSON array. DO NOT add explanations or code blocks.\n\n"
-            f"Trends: {json.dumps(batch, ensure_ascii=False)}"
+            "Each title might be a team, player, coach, match, competition, or stadium. "
+            "For each title, identify the most likely Sport and League or Competition it belongs to.\n\n"
+            "If it is unrelated to sports, use: \"sport\": \"Not a sport\" and \"league\": \"N/A\".\n\n"
+            "Return ONLY valid JSON as an array of objects like:\n"
+            "[{\"sport\": \"Soccer\", \"league\": \"Premier League\"}, ...]\n\n"
+            "Trends:\n" + json.dumps(batch, ensure_ascii=False)
         )
 
         try:
@@ -196,20 +198,21 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
                 data = json.loads(json_str)
             except JSONDecodeError:
                 print("⚠️ Failed to parse JSON. Using Unknown fallback.")
-                data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+                data = [{"sport": "Unknown", "league": "Unknown"} for _ in batch]
 
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
-            data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+            data = [{"sport": "Unknown", "league": "Unknown"} for _ in batch]
 
+        # Ensure list matches input length
         if len(data) != len(batch):
-            print("⚠️ Mismatched count. Attempting to align results.")
-            matched_titles = {d.get("team", "").strip(): d for d in data if "team" in d}
-            data = [{"team": t, "sport": matched_titles.get(t, {}).get("sport", "Unknown"), "league": matched_titles.get(t, {}).get("league", "Unknown")} for t in batch]
+            print("⚠️ Mismatched count. Attempting to align by index.")
+            data = data[:len(batch)] + [{"sport": "Unknown", "league": "Unknown"}] * (len(batch) - len(data))
 
         results.extend(data)
         time.sleep(pause)
     return results
+
 
 # --- MAIN ---
 def main():
