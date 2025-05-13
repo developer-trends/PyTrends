@@ -3,8 +3,6 @@ import os
 import json
 import time
 import requests
-from requests.exceptions import HTTPError
-from langdetect import detect
 from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -13,62 +11,7 @@ import openai
 
 # --- CONFIGURATION ---
 # Use your GitHub repository secret named 'GPT_AI' for the OpenAI API key
-openai.api_key = os.environ.get("GPT_AI")  
-CACHE_FILE = os.path.expanduser("~/.trends_wikidata_cache.json")
-
-# --- CACHING SETUP ---
-try:
-    with open(CACHE_FILE) as f:
-        CACHE = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    CACHE = {"term_to_qid": {}, "qid_props": {}, "qid_label": {}}
-
-def save_cache():
-    with open(CACHE_FILE, "w") as f:
-        json.dump(CACHE, f)
-
-# --- WIKIDATA HELPERS (unchanged) ---
-WIKIDATA_API = "https://www.wikidata.org/w/api.php"
-
-def wikidata_request(params):
-    backoff = 1
-    while True:
-        resp = requests.get(WIKIDATA_API, params=params)
-        if resp.status_code == 429:
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 60)
-            continue
-        resp.raise_for_status()
-        return resp
-
-# ... lookup_qid, get_entity_props, resolve_labels unchanged ...
-
-# --- ENRICHMENT LAYER ---
-def enrich_rows(rows):
-    """
-    Takes scraped rows and returns new rows with two extra columns:
-    - Column H: Sport
-    - Column I: League
-    """
-    enriched = []
-    for row in rows:
-        title = row[0]
-        lang = detect(title)
-        qid = lookup_qid(title, lang=lang)
-
-        sport = ""
-        league = ""
-        if qid:
-            props = get_entity_props(qid)
-            if props.get("sports"):
-                sport = resolve_labels(props["sports"])[0]
-            if props.get("leagues"):
-                league = resolve_labels(props["leagues"])[0]
-
-        enriched.append(row + [sport, league])
-
-    save_cache()
-    return enriched
+openai.api_key = os.environ.get("GPT_AI")
 
 # --- GOOGLE SHEETS SETUP ---
 def connect_to_sheet(sheet_name):
@@ -81,19 +24,145 @@ def connect_to_sheet(sheet_name):
     client = gspread.authorize(creds)
     return client.open(sheet_name).sheet1
 
-# --- SCRAPING LOGIC (unchanged) ---
-# extract_table_rows, extract_card_rows, scrape_all_pages ...
+# --- PLAYWRIGHT SCRAPERS ---
+def dismiss_cookie_banner(page):
+    for label in ("Accept all", "I agree", "AGREE"):
+        try:
+            btn = page.get_by_role("button", name=label)
+            if btn.count():
+                btn.first.click()
+                page.wait_for_timeout(800)
+                return
+        except:
+            pass
+
+def extract_table_rows(page):
+    try:
+        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
+    except TimeoutError:
+        return []
+    rows = page.locator("table tbody tr")
+    total = rows.count()
+    out = []
+    for i in range(1, total):
+        row = rows.nth(i)
+        if not row.is_visible():
+            continue
+        cells = row.locator("td")
+        if cells.count() < 5:
+            continue
+        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        volume = cells.nth(2).inner_text().split("\n")[0].strip()
+        raw = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        started = parts[0].strip() if parts else ""
+        ended = parts[1].strip() if len(parts)>1 else ""
+        explore_url = (
+            "https://trends.google.com/trends/explore"  
+            f"?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+        )
+        breakdown = ", ".join(
+            s.strip() for s in cells.nth(4)
+                .locator("span.mUIrbf-vQzf8d, span.Gwdjic")
+                .all_inner_texts() if s.strip()
+        )
+        # use volume for actual GPM column F
+        out.append([title, volume, started, ended, explore_url, volume, breakdown])
+    return out
+
+
+def extract_card_rows(page):
+    try:
+        page.wait_for_selector("div.mZ3RIc", timeout=5000)
+    except TimeoutError:
+        return []
+    cards = page.locator("div.mZ3RIc")
+    total = cards.count()
+    out = []
+    for i in range(1, total):
+        c = cards.nth(i)
+        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
+        volume = c.locator("div.search-count-title").inner_text().strip()
+        raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        started = parts[0].strip() if parts else ""
+        ended = parts[1].strip() if len(parts)>1 else ""
+        explore_url = (
+            "https://trends.google.com/trends/explore"
+            f"?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+        )
+        breakdown = ", ".join(
+            s.strip() for s in c
+                .locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
+                .all_inner_texts() if s.strip()
+        )
+        out.append([title, volume, started, ended, explore_url, volume, breakdown])
+    return out
+
+
+def scrape_all_pages():
+    all_rows = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox","--disable-setuid-sandbox"])
+        page = browser.new_page()
+        page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
+        page.wait_for_load_state("networkidle")
+        dismiss_cookie_banner(page)
+
+        while True:
+            batch = extract_table_rows(page) or extract_card_rows(page)
+            all_rows.extend(batch)
+            next_btn = page.get_by_role("button", name="Go to next page")
+            if not next_btn.count() or next_btn.first.is_disabled():
+                break
+            next_btn.first.scroll_into_view_if_needed()
+            next_btn.first.click()
+            time.sleep(3)
+
+        browser.close()
+    return all_rows
+
+# --- GPT-BASED ENRICHMENT ---
+def classify_sport_league(titles, batch_size=20, pause=0.5):
+    results = []
+    for i in range(0, len(titles), batch_size):
+        batch = titles[i : i + batch_size]
+        system = (
+            "You are a JSON generator. Given an array of esports team names, "
+            "reply ONLY with a JSON array of objects { 'team': string, 'sport': string, 'league': string }. "
+            "If unsure, use 'Unknown'."
+        )
+        user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
+        resp = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            temperature=0.0
+        )
+        data = json.loads(resp.choices[0].message.content)
+        results.extend(data)
+        time.sleep(pause)
+    return results
 
 # --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
+
+    # 1) Scrape trends
     rows = scrape_all_pages()
-    rows_enriched = enrich_rows(rows)
+
+    # 2) Classify via ChatGPT
+    titles = [r[0] for r in rows]
+    classified = classify_sport_league(titles)
+
+    # 3) Merge and write (sport→H, league→I)
+    enriched = [row + [info.get('sport',''), info.get('league','')] for row, info in zip(rows, classified)]
 
     sheet.clear()
-    sheet.append_rows(rows_enriched, value_input_option="RAW")
-
-    print(f"✅ Wrote {len(rows_enriched)} rows (Cols A–I, with Sport in H, League in I)")
+    sheet.append_rows(enriched, value_input_option="RAW")
+    print(f"✅ Wrote {len(enriched)} rows (with Sport in H, League in I)")
 
 if __name__ == "__main__":
     main()
