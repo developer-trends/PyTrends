@@ -135,18 +135,22 @@ def scrape_all_pages():
     return all_rows
 
 # --- TRANSLATE AND CLASSIFY SPORT ---
+# Replace the classify_sport_with_translation function with this:
+
 def classify_sport_with_translation(titles, batch_size=10, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i + batch_size]
         prompt = (
-            "You will be given a list of Korean trend titles. For each one:\n"
-            "1. Translate it into English as accurately as possible.\n"
-            "2. Determine what sport it most likely belongs to (e.g. Soccer, Basketball, MMA, Baseball).\n"
-            "If it is unrelated to sports, return: {\"sport\": \"Not a sport\"}\n\n"
-            "Return JSON like: [{\"sport\": \"Soccer\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
-            f"Trend titles:\n{json.dumps(batch, ensure_ascii=False)}"
+            "You will be given a list of Korean Google Trends titles. For each one:\n"
+            "1. Translate it into English.\n"
+            "2. Identify which sport it most likely refers to (e.g. Soccer, MMA, Basketball, Baseball).\n"
+            "3. If not related to sports, return \"Not a sport\".\n\n"
+            "Return a JSON array ONLY like this:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
+            f"Titles: {json.dumps(batch, ensure_ascii=False)}"
         )
+
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -154,21 +158,30 @@ def classify_sport_with_translation(titles, batch_size=10, pause=0.5):
                 temperature=0
             )
             text = resp.choices[0].message.content.strip()
+
+            # Strip markdown or extra text
             if "```" in text:
                 text = text.split("```")[-1].strip()
+
+            # Try parsing just the JSON array part
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end + 1] if start != -1 and end != -1 else text
+            json_str = text[start:end+1] if start != -1 and end != -1 else text
+
             try:
-                data = json.loads(json_str)
+                parsed = json.loads(json_str)
             except JSONDecodeError:
-                data = [{"sport": "Unknown"} for _ in batch]
+                parsed = []
+
+            # If we got fewer results than expected, pad with Unknown
+            parsed = parsed[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(parsed))
+
         except Exception:
-            data = [{"sport": "Unknown"} for _ in batch]
-        if len(data) != len(batch):
-            data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
-        results.extend(data)
+            parsed = [{"sport": "Unknown"} for _ in batch]
+
+        results.extend(parsed)
         time.sleep(pause)
     return results
+
 
 # --- MAIN ENTRYPOINT ---
 def main():
