@@ -21,8 +21,7 @@ def connect_to_sheet(sheet_name):
     ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client_sheet = gspread.authorize(creds)
-    return client_sheet.open(sheet_name).sheet1
+    return gspread.authorize(creds).open(sheet_name).sheet1
 
 # --- PLAYWRIGHT SCRAPERS ---
 def dismiss_cookie_banner(page):
@@ -108,6 +107,7 @@ def scrape_all_pages():
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
         dismiss_cookie_banner(page)
+
         while True:
             batch = extract_table_rows(page) or extract_card_rows(page)
             all_rows.extend(batch)
@@ -117,6 +117,7 @@ def scrape_all_pages():
             next_btn.first.scroll_into_view_if_needed()
             next_btn.first.click()
             time.sleep(3)
+
         browser.close()
     return all_rows
 
@@ -142,13 +143,19 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             temperature=0.0
         )
         text = resp.choices[0].message.content.strip()
-        # strip any markdown code fences
+        # Strip code fences and extract JSON substring
         if text.startswith("```"):
-            text = text.split("```", 2)[-1].strip()
+            # remove fences
+            parts = text.split("```")
+            text = parts[-1] if len(parts) > 2 else parts[1]
+        # Extract first JSON array
+        start = text.find('[')
+        end = text.rfind(']')
+        json_str = text[start:end+1] if start != -1 and end != -1 else text
         try:
-            data = json.loads(text)
+            data = json.loads(json_str)
         except JSONDecodeError:
-            print("Failed to parse JSON from GPT response:", text)
+            print("Failed to parse JSON from GPT response:", json_str)
             data = []
         results.extend(data)
         time.sleep(pause)
