@@ -57,7 +57,7 @@ def extract_table_rows(page):
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
         raw = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if parts else ""
         ended = parts[1].strip() if len(parts) > 1 else ""
 
@@ -66,7 +66,7 @@ def extract_table_rows(page):
         try:
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -100,7 +100,7 @@ def extract_card_rows(page):
         volume = c.locator("div.search-count-title").inner_text().strip()
 
         raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
+        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
         started = parts[0].strip() if parts else ""
         ended = parts[1].strip() if len(parts) > 1 else ""
         target_publish = ended
@@ -108,7 +108,7 @@ def extract_card_rows(page):
             toggle = c.locator("div.vdw3Ld")
             toggle.click(); time.sleep(0.2)
             raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -162,7 +162,7 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION: SPORT ONLY ---
+# --- GPT CLASSIFICATION: SPORT ONLY (with DEBUG) ---
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
 
@@ -171,12 +171,12 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
 
         user_prompt = (
             "You will be given a list of Google Trends titles. "
-            "Each title may refer to a player, person, stadium, or team. "
-            "Your task is to identify the sport each one is most associated with.\n\n"
-            "If it's not related to sports, return \"Not a sport\".\n"
-            "Return only valid JSON in this format:\n"
-            "[{\"sport\": \"Basketball\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
-            f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
+            "Each title may refer to a team, player, coach, match, stadium, or event. "
+            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc). "
+            "If it is unrelated to sports, respond with: {\"sport\": \"Not a sport\"}.\n\n"
+            "Return ONLY valid JSON as an array like:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
+            "Titles:\n" + json.dumps(batch, ensure_ascii=False)
         )
 
         try:
@@ -187,11 +187,12 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             )
             text = resp.choices[0].message.content.strip()
 
-            # Strip markdown if present
+            # 🔍 Debug the raw response
+            print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
+
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
-            # Find the JSON array portion
             start, end = text.find("["), text.rfind("]")
             json_str = text[start:end+1] if start != -1 and end != -1 else "[]"
 
@@ -200,23 +201,21 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             except JSONDecodeError:
                 parsed = []
 
-            # Safely align length
-            cleaned = []
+            aligned = []
             for j in range(len(batch)):
                 if j < len(parsed) and isinstance(parsed[j], dict) and "sport" in parsed[j]:
-                    cleaned.append({"sport": parsed[j]["sport"]})
+                    aligned.append({"sport": parsed[j]["sport"]})
                 else:
-                    cleaned.append({"sport": "Unknown"})
+                    aligned.append({"sport": "Unknown"})
 
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
-            cleaned = [{"sport": "Unknown"} for _ in batch]
+            aligned = [{"sport": "Unknown"} for _ in batch]
 
-        results.extend(cleaned)
+        results.extend(aligned)
         time.sleep(pause)
 
     return results
-
 
 # --- MAIN ENTRYPOINT ---
 def main():
