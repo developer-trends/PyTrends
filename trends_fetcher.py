@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 import os
 import json
@@ -36,10 +37,11 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
+
 def extract_table_rows(page):
     try:
         page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
-    except TimeoutError:
+    except PlaywrightTimeoutError:
         return []
     rows = page.locator("table tbody tr")
     total = rows.count()
@@ -73,7 +75,7 @@ def extract_table_rows(page):
 def extract_card_rows(page):
     try:
         page.wait_for_selector("div.mZ3RIc", timeout=5000)
-    except TimeoutError:
+    except PlaywrightTimeoutError:
         return []
     cards = page.locator("div.mZ3RIc")
     total = cards.count()
@@ -120,6 +122,8 @@ def scrape_all_pages():
     return all_rows
 
 # --- GPT-BASED ENRICHMENT ---
+from json import JSONDecodeError
+
 def classify_sport_league(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
@@ -138,7 +142,15 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             ],
             temperature=0.0
         )
-        data = json.loads(resp.choices[0].message.content)
+        text = resp.choices[0].message.content.strip()
+        # strip any markdown code fences
+        if text.startswith("```"):
+            text = text.split("```", 2)[-1].strip()
+        try:
+            data = json.loads(text)
+        except JSONDecodeError:
+            print("Failed to parse JSON from GPT response:", text)
+            data = []
         results.extend(data)
         time.sleep(pause)
     return results
@@ -156,3 +168,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
