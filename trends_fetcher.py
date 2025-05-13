@@ -172,8 +172,12 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
         system = (
-            "You are a helpful assistant with up-to-date internet knowledge of sports and esports. "
-            "For each trending term provided, identify the sport it belongs to (e.g. 'Dota 2', 'Soccer', 'Basketball') and the specific league, competition, or context (e.g. 'DPC', 'Premier League', 'NBA'). "
+            "You are a helpful assistant with full access to current internet information about sports and esports. "
+            "Given an array of trending terms from Google Trends, identify for each the correct sport and league/competition. "
+            "Return ONLY valid JSON in the format: [ { \"team\":<term>, \"sport\":<sport name>, \"league\":<league name> }, ... ]. "
+            "For terms referring to matches, include the sport and the league or competition. "
+            "If you cannot determine a sport or league, return \"Unknown\" for that field."
+        ) and the specific league, competition, or context (e.g. 'DPC', 'Premier League', 'NBA'). "
             "Reply ONLY with a JSON array of objects with keys 'team', 'sport', and 'league'. "
             "If you cannot determine a value, use 'Unknown'."
         )
