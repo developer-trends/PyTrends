@@ -10,7 +10,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from openai import OpenAI
 
 # --- CONFIGURATION ---
-# Initialize OpenAI client using GitHub secret 'GPT_AI'
 client = OpenAI(api_key=os.environ.get("GPT_AI"))
 
 # --- GOOGLE SHEETS SETUP ---
@@ -35,6 +34,7 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
+# ... (extract_table_rows, extract_card_rows, scrape_all_pages unchanged) ...
 
 def extract_table_rows(page):
     try:
@@ -42,33 +42,21 @@ def extract_table_rows(page):
     except PlaywrightTimeoutError:
         return []
     rows = page.locator("table tbody tr")
-    total = rows.count()
     out = []
-    for i in range(1, total):
+    for i in range(1, rows.count()):
         row = rows.nth(i)
-        if not row.is_visible():
-            continue
+        if not row.is_visible(): continue
         cells = row.locator("td")
-        if cells.count() < 5:
-            continue
+        if cells.count() < 5: continue
         title = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
         raw = cells.nth(3).inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts)>1 else ""
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
-        )
-        breakdown = ", ".join(
-            s.strip() for s in cells.nth(4)
-                .locator("span.mUIrbf-vQzf8d, span.Gwdjic")
-                .all_inner_texts() if s.strip()
-        )
+        started, ended = (parts + [""]*2)[:2]
+        explore_url = f"https://trends.google.com/trends/explore?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+        breakdown = ", ".join(s.strip() for s in cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic").all_inner_texts() if s.strip())
         out.append([title, volume, started, ended, explore_url, volume, breakdown])
     return out
-
 
 def extract_card_rows(page):
     try:
@@ -76,28 +64,18 @@ def extract_card_rows(page):
     except PlaywrightTimeoutError:
         return []
     cards = page.locator("div.mZ3RIc")
-    total = cards.count()
     out = []
-    for i in range(1, total):
+    for i in range(1, cards.count()):
         c = cards.nth(i)
         title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
         raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts)>1 else ""
-        explore_url = (
-            "https://trends.google.com/trends/explore"
-            f"?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
-        )
-        breakdown = ", ".join(
-            s.strip() for s in c
-                .locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
-                .all_inner_texts() if s.strip()
-        )
+        started, ended = (parts + [""]*2)[:2]
+        explore_url = f"https://trends.google.com/trends/explore?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
+        breakdown = ", ".join(s.strip() for s in c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic").all_inner_texts() if s.strip())
         out.append([title, volume, started, ended, explore_url, volume, breakdown])
     return out
-
 
 def scrape_all_pages():
     all_rows = []
@@ -107,17 +85,12 @@ def scrape_all_pages():
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
         dismiss_cookie_banner(page)
-
         while True:
             batch = extract_table_rows(page) or extract_card_rows(page)
             all_rows.extend(batch)
-            next_btn = page.get_by_role("button", name="Go to next page")
-            if not next_btn.count() or next_btn.first.is_disabled():
-                break
-            next_btn.first.scroll_into_view_if_needed()
-            next_btn.first.click()
-            time.sleep(3)
-
+            nxt = page.get_by_role("button", name="Go to next page")
+            if not nxt.count() or nxt.first.is_disabled(): break
+            nxt.first.scroll_into_view_if_needed(); nxt.first.click(); time.sleep(3)
         browser.close()
     return all_rows
 
@@ -127,36 +100,31 @@ from json import JSONDecodeError
 def classify_sport_league(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
-        batch = titles[i : i + batch_size]
+        batch = titles[i:i+batch_size]
         system = (
             "You are a JSON generator. Given an array of esports team names, "
-            "reply ONLY with a JSON array of objects { 'team': string, 'sport': string, 'league': string }. "
-            "If unsure, use 'Unknown'."
+            "reply ONLY with a JSON array [{ 'team': string, 'sport': string, 'league': string }]. "
+            "Use 'Unknown' if unsure."
         )
         user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user}
-            ],
-            temperature=0.0
+            model="gpt-4o-mini", messages=[{"role":"system","content":system},{"role":"user","content":user}], temperature=0.0
         )
         text = resp.choices[0].message.content.strip()
-        # Strip code fences and extract JSON substring
+        print(f"GPT raw response: {text}")
+        # strip fences & extract JSON
         if text.startswith("```"):
-            # remove fences
-            parts = text.split("```")
-            text = parts[-1] if len(parts) > 2 else parts[1]
-        # Extract first JSON array
-        start = text.find('[')
-        end = text.rfind(']')
-        json_str = text[start:end+1] if start != -1 and end != -1 else text
+            parts = text.split("```"); text = parts[-1] if len(parts)>2 else parts[1]
+        start, end = text.find('['), text.rfind(']')
+        json_str = text[start:end+1] if start!=-1 and end!=-1 else text
         try:
             data = json.loads(json_str)
         except JSONDecodeError:
-            print("Failed to parse JSON from GPT response:", json_str)
-            data = []
+            print("JSON parse failed, falling back to Unknown for batch", batch)
+            data = [{"team":t, "sport":"Unknown", "league":"Unknown"} for t in batch]
+        # ensure length matches
+        if len(data) != len(batch):
+            data = [{"team":t, "sport":"Unknown", "league":"Unknown"} for t in batch]
         results.extend(data)
         time.sleep(pause)
     return results
@@ -165,6 +133,8 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
+    if not rows:
+        print("No trends scraped; check extractor selectors."); return
     titles = [r[0] for r in rows]
     classified = classify_sport_league(titles)
     enriched = [row + [info.get('sport',''), info.get('league','')] for row, info in zip(rows, classified)]
