@@ -170,15 +170,19 @@ def classify_sport_only(titles, batch_size=10, pause=0.5):
         batch = titles[i:i + batch_size]
 
         user_prompt = (
-            "You will be given a list of Korean Google Trends titles. For each one:\n"
-            "1. First translate the title to English as accurately as possible.\n"
-            "2. Then determine the sport it is most likely associated with (e.g. Soccer, Basketball, MMA, Baseball, etc).\n"
-            "3. Only if it is clearly not related to sports, return \"Not a sport\".\n\n"
-            "Return only valid JSON in this format:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Baseball\"}, ...]\n\n"
-            "Do not return explanations, only the JSON.\n\n"
-            f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
-        )
+                "You will be given a list of Korean trend titles. Your job is to:\n"
+                "1. Translate each title to English.\n"
+                "2. Figure out what type of thing it refers to — a person, athlete, match, team, venue, etc.\n"
+                "3. If it refers to a player, athlete, coach, team, stadium, or competition — identify the sport they are involved with (e.g. Soccer, Baseball, MMA, Tennis, Basketball).\n"
+                "4. If it is clearly not related to any sport, return: \"Not a sport\".\n\n"
+                "Return only valid JSON in this format:\n"
+                "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
+                "Examples:\n"
+                "Input: [\"손흥민\", \"쿠퍼 플래그\", \"박정태\", \"코첼라\"]\n"
+                "Output: [{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Baseball\"}, {\"sport\": \"Not a sport\"}]\n\n"
+                f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
+            )
+
 
         try:
             resp = client.chat.completions.create(
