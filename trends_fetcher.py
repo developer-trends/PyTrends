@@ -131,62 +131,76 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION ---
-def classify_sport_only(titles, batch_size=10, pause=0.5):
-    results = []
+# --- GPT STEP 1: Translate Titles ---
+def translate_titles(titles, batch_size=10):
+    translated = []
     for i in range(0, len(titles), batch_size):
-        batch = titles[i:i + batch_size]
-        user_prompt = (
-            "You will be given a list of Korean Google Trends titles. Your task is:\n"
-            "1. Translate each to English.\n"
-            "2. Identify what it refers to — person, team, match, stadium, etc.\n"
-            "3. Based on that, determine the most likely sport it is associated with "
-            "(e.g. Soccer, Basketball, MMA, Baseball, Tennis).\n"
-            "Only respond with 'Not a sport' if clearly unrelated to sports (e.g. movies, music, tech).\n\n"
-            "Return ONLY valid JSON in this format:\n"
-            "[{\"sport\": \"Basketball\"}, {\"sport\": \"Soccer\"}, ...]\n\n"
-            f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
+        batch = titles[i:i+batch_size]
+        prompt = (
+            "Translate the following Korean phrases to natural English, one for each. Return only JSON array:\n"
+            f"{json.dumps(batch, ensure_ascii=False)}\n\n"
+            "Format: [\"translation1\", \"translation2\", ...]"
         )
-
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
             text = resp.choices[0].message.content.strip()
-            print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
             if "```" in text:
                 text = text.split("```")[-1].strip()
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end + 1] if start != -1 and end != -1 else "[]"
-            try:
-                parsed = json.loads(json_str)
-            except JSONDecodeError:
-                parsed = []
-            aligned = []
-            for j in range(len(batch)):
-                if j < len(parsed) and isinstance(parsed[j], dict) and "sport" in parsed[j]:
-                    aligned.append({"sport": parsed[j]["sport"]})
-                else:
-                    aligned.append({"sport": "Unknown"})
+            raw_json = text[start:end + 1] if start != -1 and end != -1 else "[]"
+            parsed = json.loads(raw_json)
+            translated.extend(parsed)
         except Exception as e:
-            print(f"❌ OpenAI API error: {e}")
-            aligned = [{"sport": "Unknown"} for _ in batch]
-        results.extend(aligned)
-        time.sleep(pause)
+            print(f"❌ Translation failed: {e}")
+            translated.extend([""] * len(batch))
+    return translated
+
+# --- GPT STEP 2: Classify Translated Titles ---
+def classify_translated_titles(english_titles, batch_size=10):
+    results = []
+    for i in range(0, len(english_titles), batch_size):
+        batch = english_titles[i:i+batch_size]
+        prompt = (
+            "You will be given a list of English phrases that refer to trending topics. "
+            "Each might refer to an athlete, player, team, stadium, event, or competition. "
+            "Your task is to determine which sport it is most associated with (e.g. Soccer, Basketball, MMA, Baseball, Tennis, etc).\n\n"
+            "Only return \"Not a sport\" if it's clearly unrelated.\n\n"
+            f"Input: {json.dumps(batch, ensure_ascii=False)}\n\n"
+            "Return JSON: [{\"sport\": \"Basketball\"}, ...]"
+        )
+        try:
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+            text = resp.choices[0].message.content.strip()
+            if "```" in text:
+                text = text.split("```")[-1].strip()
+            start, end = text.find("["), text.rfind("]")
+            raw_json = text[start:end + 1] if start != -1 and end != -1 else "[]"
+            parsed = json.loads(raw_json)
+            results.extend(parsed[:len(batch)])
+        except Exception as e:
+            print(f"❌ Classification failed: {e}")
+            results.extend([{"sport": "Unknown"} for _ in batch])
     return results
 
-# --- MAIN ---
+# --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
     if not rows:
         print("No trends scraped.")
         return
-    titles = [r[0] for r in rows]
-    classified = classify_sport_only(titles)
-    enriched = [row + [info.get("sport", "")] for row, info in zip(rows, classified)]
+    original_titles = [r[0] for r in rows]
+    translated = translate_titles(original_titles)
+    classified = classify_translated_titles(translated)
+    enriched = [row + [info.get("sport", "Unknown")] for row, info in zip(rows, classified)]
     sheet.clear()
     sheet.append_rows(enriched, value_input_option="RAW")
     print(f"✅ Wrote {len(enriched)} rows (Sport ⇢ Col H)")
