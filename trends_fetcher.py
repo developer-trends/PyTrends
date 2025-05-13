@@ -163,26 +163,22 @@ def scrape_all_pages():
     return all_rows
 
 # --- GPT CLASSIFICATION: SPORT ONLY (with DEBUG) ---
-def classify_sport_only(titles, batch_size=20, pause=0.5):
+def classify_sport_only(titles, batch_size=10, pause=0.5):
     results = []
 
     for i in range(0, len(titles), batch_size):
-        batch = titles[i:i+batch_size]
+        batch = titles[i:i + batch_size]
 
         user_prompt = (
-            "You will be given a list of Google Trends titles. Each may refer to a player, team, stadium, match, or location. "
-            "Your task is to determine which sport it's most associated with (e.g. Soccer, Basketball, MMA, Tennis, Baseball, etc). "
-            "Avoid responding with 'Not a sport' unless the trend is clearly unrelated to sports.\n\n"
-            "if it's a person, find their involvement to sport. (e.g. 쿠퍼 플래그 - is an athlete of basketball)"
-            "Return only valid JSON as an array of objects:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-            "Examples:\n"
-            "Input: [\"손흥민\", \"위니펙 제츠\", \"뉴욕 메츠\", \"코첼라\"]\n"
-            "Output: [{\"sport\": \"Soccer\"}, {\"sport\": \"Hockey\"}, {\"sport\": \"Baseball\"}, {\"sport\": \"Not a sport\"}]\n\n"
-            f"Input: {json.dumps(batch, ensure_ascii=False)}"
+            "You will be given a list of Korean Google Trends titles. For each one:\n"
+            "1. First translate the title to English as accurately as possible.\n"
+            "2. Then determine the sport it is most likely associated with (e.g. Soccer, Basketball, MMA, Baseball, etc).\n"
+            "3. Only if it is clearly not related to sports, return \"Not a sport\".\n\n"
+            "Return only valid JSON in this format:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Baseball\"}, ...]\n\n"
+            "Do not return explanations, only the JSON.\n\n"
+            f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
         )
-
-
 
         try:
             resp = client.chat.completions.create(
@@ -192,14 +188,14 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             )
             text = resp.choices[0].message.content.strip()
 
-            # 🔍 Debug the raw response
+            # Print the raw GPT reply for visibility/debugging
             print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
 
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end+1] if start != -1 and end != -1 else "[]"
+            json_str = text[start:end + 1] if start != -1 and end != -1 else "[]"
 
             try:
                 parsed = json.loads(json_str)
@@ -221,6 +217,7 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
         time.sleep(pause)
 
     return results
+
 
 # --- MAIN ENTRYPOINT ---
 def main():
