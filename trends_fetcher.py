@@ -163,19 +163,23 @@ def scrape_all_pages():
     return all_rows
 
 # --- GPT CLASSIFICATION: SPORT ONLY ---
+# --- GPT CLASSIFICATION: SPORT ONLY (Refined Prompt for Player/Person/Stadium) ---
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
 
         user_prompt = (
-            "You will be given a list of Google Trends titles. "
-            "Each title may refer to a team, player, coach, match, stadium, or event. "
-            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc).\n\n"
-            "If it is unrelated to sports, return: {\"sport\": \"Not a sport\"}.\n\n"
-            "Return ONLY valid JSON as an array like:\n"
+            "You will be given a list of Google Trends titles. Each title may refer to:\n"
+            "- A professional athlete (player/person)\n"
+            "- A sports coach\n"
+            "- A match or sports event\n"
+            "- A stadium or venue\n\n"
+            "Your task is to determine what **sport** they are most likely associated with. "
+            "If it is clearly not related to sports, respond with 'Not a sport'.\n\n"
+            "Return ONLY valid JSON in this format:\n"
             "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-            "Trends:\n" + json.dumps(batch, ensure_ascii=False)
+            f"Titles: {json.dumps(batch, ensure_ascii=False)}"
         )
 
         try:
@@ -186,8 +190,6 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             )
             text = resp.choices[0].message.content.strip()
 
-            print("🔎 RAW GPT RESPONSE:\n", text)
-
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
@@ -197,7 +199,6 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             try:
                 data = json.loads(json_str)
             except JSONDecodeError:
-                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
                 data = [{"sport": "Unknown"} for _ in batch]
 
         except Exception as e:
@@ -205,7 +206,6 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             data = [{"sport": "Unknown"} for _ in batch]
 
         if len(data) != len(batch):
-            print("⚠️ Mismatched count. Attempting to align by index.")
             data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
 
         results.extend(data)
