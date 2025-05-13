@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 import os
 import json
@@ -7,11 +8,11 @@ from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-import openai
+from openai import OpenAI
 
 # --- CONFIGURATION ---
-# Use your GitHub repository secret named 'GPT_AI' for the OpenAI API key
-openai.api_key = os.environ.get("GPT_AI")
+# Initialize OpenAI client using GitHub secret 'GPT_AI'
+client = OpenAI(api_key=os.environ.get("GPT_AI"))
 
 # --- GOOGLE SHEETS SETUP ---
 def connect_to_sheet(sheet_name):
@@ -21,8 +22,8 @@ def connect_to_sheet(sheet_name):
     ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    return client.open(sheet_name).sheet1
+    client_sheet = gspread.authorize(creds)
+    return client_sheet.open(sheet_name).sheet1
 
 # --- PLAYWRIGHT SCRAPERS ---
 def dismiss_cookie_banner(page):
@@ -58,7 +59,7 @@ def extract_table_rows(page):
         started = parts[0].strip() if parts else ""
         ended = parts[1].strip() if len(parts)>1 else ""
         explore_url = (
-            "https://trends.google.com/trends/explore"  
+            "https://trends.google.com/trends/explore"
             f"?q={quote(title)}&date=now%201-d&geo=KR&hl=en"
         )
         breakdown = ", ".join(
@@ -66,7 +67,6 @@ def extract_table_rows(page):
                 .locator("span.mUIrbf-vQzf8d, span.Gwdjic")
                 .all_inner_texts() if s.strip()
         )
-        # use volume for actual GPM column F
         out.append([title, volume, started, ended, explore_url, volume, breakdown])
     return out
 
@@ -108,7 +108,6 @@ def scrape_all_pages():
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
         dismiss_cookie_banner(page)
-
         while True:
             batch = extract_table_rows(page) or extract_card_rows(page)
             all_rows.extend(batch)
@@ -118,7 +117,6 @@ def scrape_all_pages():
             next_btn.first.scroll_into_view_if_needed()
             next_btn.first.click()
             time.sleep(3)
-
         browser.close()
     return all_rows
 
@@ -133,7 +131,7 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             "If unsure, use 'Unknown'."
         )
         user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
-        resp = openai.ChatCompletion.create(
+        resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system},
@@ -149,20 +147,14 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
 # --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
-
-    # 1) Scrape trends
     rows = scrape_all_pages()
-
-    # 2) Classify via ChatGPT
     titles = [r[0] for r in rows]
     classified = classify_sport_league(titles)
-
-    # 3) Merge and write (sport→H, league→I)
     enriched = [row + [info.get('sport',''), info.get('league','')] for row, info in zip(rows, classified)]
-
     sheet.clear()
     sheet.append_rows(enriched, value_input_option="RAW")
     print(f"✅ Wrote {len(enriched)} rows (with Sport in H, League in I)")
 
 if __name__ == "__main__":
     main()
+```
