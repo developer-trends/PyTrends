@@ -173,6 +173,7 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             "You will be given a list of Google Trends titles. Each may refer to a player, team, stadium, match, or location. "
             "Your task is to determine which sport it's most associated with (e.g. Soccer, Basketball, MMA, Tennis, Baseball, etc). "
             "Avoid responding with 'Not a sport' unless the trend is clearly unrelated to sports.\n\n"
+            "if it's a person, find their involvement to sport. (e.g. 쿠퍼 플래그 - is an athlete of basketball)"
             "Return only valid JSON as an array of objects:\n"
             "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
             "Examples:\n"
