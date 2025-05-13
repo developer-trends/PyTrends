@@ -170,15 +170,17 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
         batch = titles[i:i+batch_size]
 
         user_prompt = (
-                "You will be given a list of Google Trends titles. "
-                "Each title may refer to a team, player, coach, stadium, match, or sports-related event. "
-                "Your task is to identify the most likely sport it is associated with (e.g. Soccer, Basketball, MMA, Baseball, Tennis, Golf, etc).\n\n"
-                "Avoid using 'Not a sport' unless it is truly unrelated to any known sport (e.g. pop culture, music, politics, tech).\n"
-                "Do your best to infer the relevant sport even if the name refers to a stadium, location, or public figure involved in sports.\n\n"
-                "Return ONLY valid JSON in this format:\n"
-                "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-                "Titles:\n" + json.dumps(batch, ensure_ascii=False)
-            )
+            "You will be given a list of Google Trends titles. Each may refer to a player, team, stadium, match, or location. "
+            "Your task is to determine which sport it's most associated with (e.g. Soccer, Basketball, MMA, Tennis, Baseball, etc). "
+            "Avoid responding with 'Not a sport' unless the trend is clearly unrelated to sports.\n\n"
+            "Return only valid JSON as an array of objects:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
+            "Examples:\n"
+            "Input: [\"손흥민\", \"위니펙 제츠\", \"뉴욕 메츠\", \"코첼라\"]\n"
+            "Output: [{\"sport\": \"Soccer\"}, {\"sport\": \"Hockey\"}, {\"sport\": \"Baseball\"}, {\"sport\": \"Not a sport\"}]\n\n"
+            f"Input: {json.dumps(batch, ensure_ascii=False)}"
+        )
+
 
 
         try:
