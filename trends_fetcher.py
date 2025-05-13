@@ -162,55 +162,58 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION: SPORT ONLY ---
-# --- GPT CLASSIFICATION: SPORT ONLY (Refined Prompt for Player/Person/Stadium) ---
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
-    for i in range(0, len(titles), batch_size):
-        batch = titles[i:i+batch_size]
 
-        user_prompt = (
+    for i in range(0, len(titles), batch_size):
+        batch = titles[i:i + batch_size]
+
+        prompt = (
             "You will be given a list of Google Trends titles. Each title may refer to:\n"
             "- A professional athlete (player/person)\n"
             "- A sports coach\n"
             "- A match or sports event\n"
             "- A stadium or venue\n\n"
             "Your task is to determine what **sport** they are most likely associated with. "
-            "If it is clearly not related to sports, respond with 'Not a sport'.\n\n"
+            "If it is clearly not related to sports, respond with \"Not a sport\".\n\n"
             "Return ONLY valid JSON in this format:\n"
             "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
             f"Titles: {json.dumps(batch, ensure_ascii=False)}"
         )
 
         try:
-            resp = client.chat.completions.create(
+            response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
-            text = resp.choices[0].message.content.strip()
+            text = response.choices[0].message.content.strip()
 
+            # Strip markdown blocks
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
+            # Try to isolate and parse the JSON array
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end+1] if start != -1 and end != -1 else text
+            json_str = text[start:end + 1] if start != -1 and end != -1 else text
 
             try:
-                data = json.loads(json_str)
+                parsed = json.loads(json_str)
             except JSONDecodeError:
-                data = [{"sport": "Unknown"} for _ in batch]
+                parsed = []
+
+            # If not all results returned, pad the rest with Unknown
+            parsed = parsed[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(parsed))
 
         except Exception as e:
-            print(f"❌ OpenAI API error: {e}")
-            data = [{"sport": "Unknown"} for _ in batch]
+            print(f"❌ OpenAI error: {e}")
+            parsed = [{"sport": "Unknown"} for _ in batch]
 
-        if len(data) != len(batch):
-            data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
-
-        results.extend(data)
+        results.extend(parsed)
         time.sleep(pause)
+
     return results
+
 
 # --- MAIN ENTRYPOINT ---
 def main():
