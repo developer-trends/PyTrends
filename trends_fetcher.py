@@ -177,9 +177,6 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             "Return ONLY valid JSON in the format: [ { \"team\":<term>, \"sport\":<sport name>, \"league\":<league name> }, ... ]. "
             "For terms referring to matches, include the sport and the league or competition. "
             "If you cannot determine a sport or league, return \"Unknown\" for that field."
-        ) and the specific league, competition, or context (e.g. 'DPC', 'Premier League', 'NBA'). "
-            "Reply ONLY with a JSON array of objects with keys 'team', 'sport', and 'league'. "
-            "If you cannot determine a value, use 'Unknown'."
         )
         user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
         resp = client.chat.completions.create(
@@ -204,6 +201,7 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
     return results
 
 # --- MAIN ENTRYPOINT ---
+
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
