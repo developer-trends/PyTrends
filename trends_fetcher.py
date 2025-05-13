@@ -132,7 +132,10 @@ def extract_card_rows(page):
 def scrape_all_pages():
     all_rows = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
         page.wait_for_load_state("networkidle")
@@ -171,51 +174,61 @@ def translate_title(text):
         print(f"⚠️ Translation failed for '{text}': {e}")
         return text
 
-def is_probably_name(text):
-    return bool(re.match(r"^[A-Z][a-z]+( [A-Z][a-z]+)?$", text.strip()))
-
-def classify_sport_only(titles, pause=0.5):
+def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
-    for original in titles:
-        translated = translate_title(original)
-        print(f"🔤 Translated '{original}' → '{translated}'")
 
-        if is_probably_name(translated):
-            prompt = (
-                f"'{translated}' is a trending name. Determine which sport this person is most likely associated with. "
-                "Only return the sport name, or 'Unknown' if clearly unrelated."
-            )
-            try:
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.5
-                )
-                sport = resp.choices[0].message.content.strip().splitlines()[0]
-            except Exception as e:
-                print(f"❌ GPT error for name: {e}")
-                sport = "Unknown"
-        else:
-            batch_prompt = (
-                "You will be given a Google Trends title. "
-                "It may refer to a team, athlete, coach, stadium, tournament, or sports event. "
-                "Your task is to identify the most likely sport. "
-                "Return only the sport name, like 'Soccer', 'Basketball', etc., or 'Unknown'.\n\n"
-                f"Title: {translated}"
-            )
-            try:
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": batch_prompt}],
-                    temperature=0.5
-                )
-                sport = resp.choices[0].message.content.strip().splitlines()[0]
-            except Exception as e:
-                print(f"❌ GPT error for general title: {e}")
-                sport = "Unknown"
+    for i in range(0, len(titles), batch_size):
+        batch = titles[i:i+batch_size]
+        translated_batch = [translate_title(title) for title in batch]
 
-        results.append({"sport": sport})
+        user_prompt = (
+            "You will be given a list of Google Trends titles. "
+            "Each title may refer to a team, athlete, coach, stadium, tournament, or sports event. "
+            "Your task is to identify the most likely Sport associated with each title. "
+            "Examples of sports: Soccer, Basketball, American Football, Baseball, Cricket, MMA, Boxing, Tennis, Golf, Formula 1, Cycling, Esports, Olympics, etc. "
+            "If a title is clearly unrelated to any sport, respond with: {\"sport\": \"Unknown\"}.\n\n"
+            "Use your best judgment for ambiguous names based on real-world relevance. "
+            "Respond ONLY with valid JSON as an array, like:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Unknown\"}]\n\n"
+            "Titles:\n" + json.dumps(translated_batch, ensure_ascii=False)
+        )
+
+        try:
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=0.5
+            )
+            text = resp.choices[0].message.content.strip()
+
+            print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
+
+            if "```" in text:
+                text = text.split("```")[-1].strip()
+
+            start, end = text.find("["), text.rfind("]")
+            json_str = text[start:end+1] if start != -1 and end != -1 else "[]"
+
+            try:
+                parsed = json.loads(json_str)
+            except JSONDecodeError:
+                print("⚠️ JSON parse error, using fallback 'Unknown'")
+                parsed = []
+
+            aligned = []
+            for j in range(len(batch)):
+                if j < len(parsed) and isinstance(parsed[j], dict) and "sport" in parsed[j]:
+                    aligned.append({"sport": parsed[j]["sport"]})
+                else:
+                    aligned.append({"sport": "Unknown"})
+
+        except Exception as e:
+            print(f"❌ OpenAI API error: {e}")
+            aligned = [{"sport": "Unknown"} for _ in batch]
+
+        results.extend(aligned)
         time.sleep(pause)
+
     return results
 
 # --- MAIN ENTRYPOINT ---
