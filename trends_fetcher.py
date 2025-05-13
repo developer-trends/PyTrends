@@ -200,7 +200,7 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
 # --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
-    rows = scrape\ALL\_pages()
+    rows = scrape_all_pages()
     if not rows:
         print("No trends scraped; check selectors.")
         return
