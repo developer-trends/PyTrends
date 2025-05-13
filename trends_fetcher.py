@@ -132,7 +132,7 @@ def scrape_all_pages():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox"]
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
@@ -162,19 +162,19 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION FIXED ---
-def classify_sport_league(titles, batch_size=20, pause=0.5):
+# --- GPT CLASSIFICATION: SPORT ONLY ---
+def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
 
         user_prompt = (
             "You will be given a list of Google Trends titles. "
-            "Each title might be a team, player, coach, match, competition, or stadium. "
-            "For each title, identify the most likely Sport and League or Competition it belongs to.\n\n"
-            "If it is unrelated to sports, use: \"sport\": \"Not a sport\" and \"league\": \"N/A\".\n\n"
-            "Return ONLY valid JSON as an array of objects like:\n"
-            "[{\"sport\": \"Soccer\", \"league\": \"Premier League\"}, ...]\n\n"
+            "Each title may refer to a team, player, coach, match, stadium, or event. "
+            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc).\n\n"
+            "If it is unrelated to sports, return: {\"sport\": \"Not a sport\"}.\n\n"
+            "Return ONLY valid JSON as an array like:\n"
+            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
             "Trends:\n" + json.dumps(batch, ensure_ascii=False)
         )
 
@@ -198,23 +198,21 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
                 data = json.loads(json_str)
             except JSONDecodeError:
                 print("⚠️ Failed to parse JSON. Using Unknown fallback.")
-                data = [{"sport": "Unknown", "league": "Unknown"} for _ in batch]
+                data = [{"sport": "Unknown"} for _ in batch]
 
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
-            data = [{"sport": "Unknown", "league": "Unknown"} for _ in batch]
+            data = [{"sport": "Unknown"} for _ in batch]
 
-        # Ensure list matches input length
         if len(data) != len(batch):
             print("⚠️ Mismatched count. Attempting to align by index.")
-            data = data[:len(batch)] + [{"sport": "Unknown", "league": "Unknown"}] * (len(batch) - len(data))
+            data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
 
         results.extend(data)
         time.sleep(pause)
     return results
 
-
-# --- MAIN ---
+# --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
@@ -222,11 +220,11 @@ def main():
         print("No trends scraped; check selectors.")
         return
     titles = [r[0] for r in rows]
-    classified = classify_sport_league(titles)
-    enriched = [row + [info.get('sport',''), info.get('league','')] for row, info in zip(rows, classified)]
+    classified = classify_sport_only(titles)
+    enriched = [row + [info.get('sport', '')] for row, info in zip(rows, classified)]
     sheet.clear()
     sheet.append_rows(enriched, value_input_option="RAW")
-    print(f"✅ Wrote {len(enriched)} rows (Sport⇢Col H, League⇢Col I)")
+    print(f"✅ Wrote {len(enriched)} rows (Sport⇢Col H)")
 
 if __name__ == "__main__":
     main()
