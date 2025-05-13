@@ -165,17 +165,18 @@ def scrape_all_pages():
 # --- GPT CLASSIFICATION: SPORT ONLY ---
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
+
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
 
         user_prompt = (
             "You will be given a list of Google Trends titles. "
-            "Each title may refer to a team, player, coach, match, stadium, or event. "
-            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc).\n\n"
-            "If it is unrelated to sports, return: {\"sport\": \"Not a sport\"}.\n\n"
-            "Return ONLY valid JSON as an array like:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-            "Trends:\n" + json.dumps(batch, ensure_ascii=False)
+            "Each title may refer to a player, person, stadium, or team. "
+            "Your task is to identify the sport each one is most associated with.\n\n"
+            "If it's not related to sports, return \"Not a sport\".\n"
+            "Return only valid JSON in this format:\n"
+            "[{\"sport\": \"Basketball\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
+            f"Titles:\n{json.dumps(batch, ensure_ascii=False)}"
         )
 
         try:
@@ -186,31 +187,36 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
             )
             text = resp.choices[0].message.content.strip()
 
-            print("🔎 RAW GPT RESPONSE:\n", text)
-
+            # Strip markdown if present
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
+            # Find the JSON array portion
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end+1] if start != -1 and end != -1 else text
+            json_str = text[start:end+1] if start != -1 and end != -1 else "[]"
 
             try:
-                data = json.loads(json_str)
+                parsed = json.loads(json_str)
             except JSONDecodeError:
-                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
-                data = [{"sport": "Unknown"} for _ in batch]
+                parsed = []
+
+            # Safely align length
+            cleaned = []
+            for j in range(len(batch)):
+                if j < len(parsed) and isinstance(parsed[j], dict) and "sport" in parsed[j]:
+                    cleaned.append({"sport": parsed[j]["sport"]})
+                else:
+                    cleaned.append({"sport": "Unknown"})
 
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
-            data = [{"sport": "Unknown"} for _ in batch]
+            cleaned = [{"sport": "Unknown"} for _ in batch]
 
-        if len(data) != len(batch):
-            print("⚠️ Mismatched count. Attempting to align by index.")
-            data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
-
-        results.extend(data)
+        results.extend(cleaned)
         time.sleep(pause)
+
     return results
+
 
 # --- MAIN ENTRYPOINT ---
 def main():
