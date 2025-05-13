@@ -142,14 +142,18 @@ def classify_sport_with_translation(titles, batch_size=10, pause=0.5):
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i + batch_size]
         prompt = (
-            "You will be given a list of Korean Google Trends titles. For each one:\n"
-            "1. Translate it into English.\n"
-            "2. Identify which sport it most likely refers to (e.g. Soccer, MMA, Basketball, Baseball).\n"
-            "3. If not related to sports, return \"Not a sport\".\n\n"
-            "Return a JSON array ONLY like this:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
-            f"Titles: {json.dumps(batch, ensure_ascii=False)}"
-        )
+                "You will be given a list of Korean trend titles. For each one:\n"
+                "1. Translate the title to English.\n"
+                "2. Identify the sport it most likely refers to (e.g. Soccer, MMA, Baseball, etc).\n"
+                "3. If it's not related to sports, return \"Not a sport\".\n\n"
+                "Return a JSON array in this format:\n"
+                "[{\"sport\": \"Soccer\"}, {\"sport\": \"Not a sport\"}, ...]\n\n"
+                "Examples:\n"
+                "Input: [\"손흥민\", \"류현진\", \"코첼라\"]\n"
+                "Output: [{\"sport\": \"Soccer\"}, {\"sport\": \"Baseball\"}, {\"sport\": \"Not a sport\"}]\n\n"
+                f"Input: {json.dumps(batch, ensure_ascii=False)}"
+            )
+
 
         try:
             resp = client.chat.completions.create(
