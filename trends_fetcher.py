@@ -162,58 +162,55 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
+# --- GPT CLASSIFICATION: SPORT ONLY ---
 def classify_sport_only(titles, batch_size=20, pause=0.5):
     results = []
-
     for i in range(0, len(titles), batch_size):
-        batch = titles[i:i + batch_size]
+        batch = titles[i:i+batch_size]
 
-        prompt = (
-            "You will be given a list of Google Trends titles. Each title may refer to:\n"
-            "- A professional athlete (player/person)\n"
-            "- A sports coach\n"
-            "- A match or sports event\n"
-            "- A stadium or venue\n\n"
-            "Your task is to determine what **sport** they are most likely associated with. "
-            "If it is clearly not related to sports, respond with \"Not a sport\".\n\n"
-            "Return ONLY valid JSON in this format:\n"
+        user_prompt = (
+            "You will be given a list of Google Trends titles. "
+            "Each title may refer to a team, player, coach, match, stadium, or event. "
+            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc).\n\n"
+            "If it is unrelated to sports, return: {\"sport\": \"Not a sport\"}.\n\n"
+            "Return ONLY valid JSON as an array like:\n"
             "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-            f"Titles: {json.dumps(batch, ensure_ascii=False)}"
+            "Trends:\n" + json.dumps(batch, ensure_ascii=False)
         )
 
         try:
-            response = client.chat.completions.create(
+            resp = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": user_prompt}],
                 temperature=0
             )
-            text = response.choices[0].message.content.strip()
+            text = resp.choices[0].message.content.strip()
 
-            # Strip markdown blocks
+            print("🔎 RAW GPT RESPONSE:\n", text)
+
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
-            # Try to isolate and parse the JSON array
             start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end + 1] if start != -1 and end != -1 else text
+            json_str = text[start:end+1] if start != -1 and end != -1 else text
 
             try:
-                parsed = json.loads(json_str)
+                data = json.loads(json_str)
             except JSONDecodeError:
-                parsed = []
-
-            # If not all results returned, pad the rest with Unknown
-            parsed = parsed[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(parsed))
+                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
+                data = [{"sport": "Unknown"} for _ in batch]
 
         except Exception as e:
-            print(f"❌ OpenAI error: {e}")
-            parsed = [{"sport": "Unknown"} for _ in batch]
+            print(f"❌ OpenAI API error: {e}")
+            data = [{"sport": "Unknown"} for _ in batch]
 
-        results.extend(parsed)
+        if len(data) != len(batch):
+            print("⚠️ Mismatched count. Attempting to align by index.")
+            data = data[:len(batch)] + [{"sport": "Unknown"}] * (len(batch) - len(data))
+
+        results.extend(data)
         time.sleep(pause)
-
     return results
-
 
 # --- MAIN ENTRYPOINT ---
 def main():
