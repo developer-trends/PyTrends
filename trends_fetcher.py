@@ -37,7 +37,6 @@ def dismiss_cookie_banner(page):
         except:
             pass
 
-
 def extract_table_rows(page):
     try:
         page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
@@ -87,7 +86,6 @@ def extract_table_rows(page):
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
 
-
 def extract_card_rows(page):
     try:
         page.wait_for_selector("div.mZ3RIc", timeout=5000)
@@ -129,7 +127,6 @@ def extract_card_rows(page):
 
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
     return out
-
 
 def scrape_all_pages():
     all_rows = []
@@ -187,7 +184,7 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
         text = resp.choices[0].message.content.strip()
         if text.startswith("```"):
             parts = text.split("```")
-            text = parts[-1] if len(parts)>2 else parts[1]
+            text = parts[-1] if len(parts) > 2 else parts[1]
         start, end = text.find('['), text.rfind(']')
         json_str = text[start:end+1] if start!=-1 and end!=-1 else text
         try:
@@ -201,7 +198,6 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
     return results
 
 # --- MAIN ENTRYPOINT ---
-
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
