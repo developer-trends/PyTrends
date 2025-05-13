@@ -22,7 +22,6 @@ def connect_to_sheet(sheet_name):
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client_sheet = gspread.authorize(creds)
-    # Use first worksheet
     return client_sheet.open(sheet_name).get_worksheet(0)
 
 # --- SCRAPING LOGIC ---
@@ -55,20 +54,21 @@ def extract_table_rows(page):
         cells = row.locator("td")
         if cells.count() < 5:
             continue
-        title  = cells.nth(1).inner_text().split("\n")[0].strip()
+
+        title = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        raw   = cells.nth(3).inner_text().split("\n")
+        raw = cells.nth(3).inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
+        ended = parts[1].strip() if len(parts) > 1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -99,18 +99,19 @@ def extract_card_rows(page):
     out = []
     for i in range(1, total):
         c = cards.nth(i)
-        title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
+        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
         raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended   = parts[1].strip() if len(parts)>1 else ""
+        ended = parts[1].strip() if len(parts) > 1 else ""
         target_publish = ended
         try:
+            toggle = c.locator("div.vdw3Ld")
             toggle.click(); time.sleep(0.2)
             raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
+            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -171,9 +172,10 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
         system = (
-            "You are a JSON generator. Given an array of esports team names, "
-            "reply ONLY with a JSON array of objects { 'team': string, 'sport': string, 'league': string }. "
-            "If unsure, use 'Unknown'."
+            "You are a helpful assistant with up-to-date internet knowledge of sports and esports. "
+            "For each trending term provided, identify the sport it belongs to (e.g. 'Dota 2', 'Soccer', 'Basketball') and the specific league, competition, or context (e.g. 'DPC', 'Premier League', 'NBA'). "
+            "Reply ONLY with a JSON array of objects with keys 'team', 'sport', and 'league'. "
+            "If you cannot determine a value, use 'Unknown'."
         )
         user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
         resp = client.chat.completions.create(
