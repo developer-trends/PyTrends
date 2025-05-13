@@ -169,11 +169,11 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
         batch = titles[i:i+batch_size]
 
         user_prompt = (
-            "Provide the Sport and League of these Trends: " +
-            json.dumps(batch, ensure_ascii=False) +
-            "\n\nReturn only JSON in the format: "
-            "[{\"team\":<title>, \"sport\":<sport>, \"league\":<league>}]\n"
-            "No explanations. No formatting. No code block."
+            "You will be given a list of Google Trends titles. "
+            "For each title, identify the most likely Sport and the League it belongs to. "
+            "If it's not sports-related, return 'Not a sport' for sport and 'N/A' for league.\n\n"
+            "Return ONLY a valid JSON array. DO NOT add explanations or code blocks.\n\n"
+            f"Trends: {json.dumps(batch, ensure_ascii=False)}"
         )
 
         try:
@@ -184,6 +184,8 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             )
             text = resp.choices[0].message.content.strip()
 
+            print("🔎 RAW GPT RESPONSE:\n", text)
+
             if "```" in text:
                 text = text.split("```")[-1].strip()
 
@@ -193,15 +195,17 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             try:
                 data = json.loads(json_str)
             except JSONDecodeError:
-                print("⚠️ Failed to parse JSON. Showing raw response:\n", text)
+                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
                 data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
             data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
 
         if len(data) != len(batch):
-            print("⚠️ Mismatched count. Falling back to Unknown.")
-            data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+            print("⚠️ Mismatched count. Attempting to align results.")
+            matched_titles = {d.get("team", "").strip(): d for d in data if "team" in d}
+            data = [{"team": t, "sport": matched_titles.get(t, {}).get("sport", "Unknown"), "league": matched_titles.get(t, {}).get("league", "Unknown")} for t in batch]
 
         results.extend(data)
         time.sleep(pause)
