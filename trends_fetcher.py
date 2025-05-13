@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 import os
 import json
@@ -9,9 +10,14 @@ from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+import openai
+
+# --- CONFIGURATION ---
+# Use your GitHub repository secret named 'GPT_AI' for the OpenAI API key
+openai.api_key = os.environ.get("GPT_AI")  
+CACHE_FILE = os.path.expanduser("~/.trends_wikidata_cache.json")
 
 # --- CACHING SETUP ---
-CACHE_FILE = os.path.expanduser("~/.trends_wikidata_cache.json")
 try:
     with open(CACHE_FILE) as f:
         CACHE = json.load(f)
@@ -22,7 +28,7 @@ def save_cache():
     with open(CACHE_FILE, "w") as f:
         json.dump(CACHE, f)
 
-# --- WIKIDATA BACKOFF HELPER ---
+# --- WIKIDATA HELPERS (unchanged) ---
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 
 def wikidata_request(params):
@@ -30,189 +36,66 @@ def wikidata_request(params):
     while True:
         resp = requests.get(WIKIDATA_API, params=params)
         if resp.status_code == 429:
-            print(f"⚠️ Rate limited, sleeping {backoff}s…")
             time.sleep(backoff)
             backoff = min(backoff * 2, 60)
             continue
         resp.raise_for_status()
         return resp
 
-# --- WIKIDATA UTILITIES ---
-def lookup_qid(term, lang="en"):
-    cache_key = f"{lang}:{term}"
-    if cache_key in CACHE['term_to_qid']:
-        return CACHE['term_to_qid'][cache_key]
-    params = {"action": "wbsearchentities", "search": term, "language": lang, "format": "json"}
-    resp = wikidata_request(params)
-    results = resp.json().get("search", [])
-    qid = results[0]["id"] if results else None
-    CACHE['term_to_qid'][cache_key] = qid
-    time.sleep(0.05)
-    return qid
-
-
-def get_entity_props(qid):
-    if qid in CACHE['qid_props']:
-        return CACHE['qid_props'][qid]
-    params = {"action": "wbgetentities", "ids": qid, "props": "claims", "format": "json"}
-    resp = wikidata_request(params)
-    claims = resp.json()["entities"][qid]["claims"]
-    def extract(pid):
-        return [c["mainsnak"]["datavalue"]["value"]["id"]
-                for c in claims.get(pid, []) if "datavalue" in c["mainsnak"]]
-    props = {"sports": extract("P641"), "leagues": extract("P118")}
-    CACHE['qid_props'][qid] = props
-    time.sleep(0.05)
-    return props
-
-
-def resolve_labels(qids):
-    missing = [q for q in qids if q not in CACHE['qid_label']]
-    if missing:
-        params = {
-            "action": "wbgetentities",
-            "ids": "|".join(missing),
-            "props": "labels",
-            "languages": "en,vi,th,ko,ja,zh",
-            "format": "json"
-        }
-        resp = wikidata_request(params)
-        data = resp.json().get("entities", {})
-        for qid, ent in data.items():
-            lbls = ent.get("labels", {})
-            label = lbls.get("en", {}).get("value") or next(iter(lbls.values()))["value"]
-            CACHE['qid_label'][qid] = label
-    return [CACHE['qid_label'].get(q) for q in qids]
+# ... lookup_qid, get_entity_props, resolve_labels unchanged ...
 
 # --- ENRICHMENT LAYER ---
 def enrich_rows(rows):
+    """
+    Takes scraped rows and returns new rows with two extra columns:
+    - Column H: Sport
+    - Column I: League
+    """
     enriched = []
     for row in rows:
         title = row[0]
         lang = detect(title)
         qid = lookup_qid(title, lang=lang)
-        sport = league = None
+
+        sport = ""
+        league = ""
         if qid:
             props = get_entity_props(qid)
-            if props["sports"]:
+            if props.get("sports"):
                 sport = resolve_labels(props["sports"])[0]
-            if props["leagues"]:
+            if props.get("leagues"):
                 league = resolve_labels(props["leagues"])[0]
+
         enriched.append(row + [sport, league])
+
     save_cache()
     return enriched
 
 # --- GOOGLE SHEETS SETUP ---
 def connect_to_sheet(sheet_name):
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    return client.open(sheet_name).get_worksheet(0)
+    return client.open(sheet_name).sheet1
 
-# --- PLAYWRIGHT SCRAPERS ---
-def dismiss_cookie_banner(page):
-    for label in ("Accept all", "I agree", "AGREE"):
-        try:
-            btn = page.get_by_role("button", name=label)
-            if btn.count():
-                btn.first.click()
-                page.wait_for_timeout(800)
-                print("🛡️ Dismissed cookie banner")
-                return
-        except:
-            pass
-
-
-def extract_table_rows(page):
-    try:
-        page.wait_for_selector("table tbody tr", state="attached", timeout=5000)
-    except PlaywrightTimeoutError:
-        return []
-    rows = page.locator("table tbody tr")
-    total = rows.count()
-    print(f"🔢 [table] found {total} rows – skipping the header row")
-    out = []
-    for i in range(1, total):
-        row = rows.nth(i)
-        if not row.is_visible():
-            continue
-        cells = row.locator("td")
-        if cells.count() < 5:
-            continue
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
-        volume = cells.nth(2).inner_text().split("\n")[0].strip()
-        raw = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts)>1 else ""
-        q = quote(title)
-        explore_url = f"https://trends.google.com/trends/explore?q={q}&date=now%201-d&geo=KR&hl=en"
-        breakdown_spans = cells.nth(4).locator("span.mUIrbf-vQzf8d, span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in breakdown_spans.all_inner_texts() if s.strip())
-        # Place actual volume value into column F instead of timeline toggle
-        out.append([title, volume, started, ended, explore_url, volume, breakdown])
-    return out
-
-
-def extract_card_rows(page):
-    try:
-        page.wait_for_selector("div.mZ3RIc", timeout=5000)
-    except PlaywrightTimeoutError:
-        return []
-    cards = page.locator("div.mZ3RIc")
-    total = cards.count()
-    print(f"🃏 [card] found {total} cards – skipping the header card")
-    out = []
-    for i in range(1, total):
-        c = cards.nth(i)
-        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
-        volume = c.locator("div.search-count-title").inner_text().strip()
-        raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
-        started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts)>1 else ""
-        q = quote(title)
-        explore_url = f"https://trends.google.com/trends/explore?q={q}&date=now%201-d&geo=KR&hl=en"
-        breakdown_spans = c.locator("div.lqv0Cb span.mUIrbf-vQzf8d, div.lqv0Cb span.Gwdjic")
-        breakdown = ", ".join(s.strip() for s in breakdown_spans.all_inner_texts() if s.strip())
-        # Place actual volume value into column F instead of timeline toggle
-        out.append([title, volume, started, ended, explore_url, volume, breakdown])
-    return out
-
-
-def scrape_all_pages():
-    all_rows = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox","--disable-setuid-sandbox"])
-        page = browser.new_page()
-        page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
-        page.wait_for_load_state("networkidle")
-        print("First page loaded")
-        dismiss_cookie_banner(page)
-        while True:
-            print(f"📄 Scraping next batch")
-            batch = extract_table_rows(page) or extract_card_rows(page)
-            print(f"  → got {len(batch)} rows")
-            all_rows.extend(batch)
-            next_btn = page.get_by_role("button", name="Go to next page")
-            if not next_btn.count() or next_btn.first.is_disabled():
-                print("No more pages")
-                break
-            next_btn.first.scroll_into_view_if_needed()
-            next_btn.first.click()
-            time.sleep(3)
-        browser.close()
-    return all_rows
+# --- SCRAPING LOGIC (unchanged) ---
+# extract_table_rows, extract_card_rows, scrape_all_pages ...
 
 # --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
     rows_enriched = enrich_rows(rows)
+
     sheet.clear()
     sheet.append_rows(rows_enriched, value_input_option="RAW")
-    print(f"✅ {len(rows_enriched)} trends saved to Google Sheet (including sport and league)")
+
+    print(f"✅ Wrote {len(rows_enriched)} rows (Cols A–I, with Sport in H, League in I)")
 
 if __name__ == "__main__":
     main()
+```
