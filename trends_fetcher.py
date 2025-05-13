@@ -10,7 +10,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from openai import OpenAI
 
 # --- CONFIGURATION ---
-# Initialize OpenAI client using GitHub secret 'GPT_AI'
 client = OpenAI(api_key=os.environ.get("GPT_AI"))
 
 # --- GOOGLE SHEETS SETUP ---
@@ -163,7 +162,7 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT-BASED CLASSIFICATION ---
+# --- GPT CLASSIFICATION FIXED ---
 def classify_sport_league(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
@@ -173,47 +172,42 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
             "Provide the Sport and League of these Trends: " +
             json.dumps(batch, ensure_ascii=False) +
             "\n\nReturn only JSON in the format: "
-            "[{\"team\":<title>, \"sport\":<sport>, \"league\":<league>}, ...]"
+            "[{\"team\":<title>, \"sport\":<sport>, \"league\":<league>}]\n"
+            "No explanations. No formatting. No code block."
         )
 
         try:
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ],
+                messages=[{"role": "user", "content": user_prompt}],
                 temperature=0
             )
             text = resp.choices[0].message.content.strip()
 
-            # Remove markdown wrapping if present
-            if text.startswith("```"):
-                parts = text.split("```")
-                text = parts[-1] if len(parts) > 2 else parts[1]
+            if "```" in text:
+                text = text.split("```")[-1].strip()
 
-            start, end = text.find('['), text.rfind(']')
+            start, end = text.find("["), text.rfind("]")
             json_str = text[start:end+1] if start != -1 and end != -1 else text
 
             try:
                 data = json.loads(json_str)
             except JSONDecodeError:
-                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
+                print("⚠️ Failed to parse JSON. Showing raw response:\n", text)
                 data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
             data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
 
-        # Validate result count
         if len(data) != len(batch):
-            print("⚠️ Mismatched result count. Falling back to Unknown for this batch.")
+            print("⚠️ Mismatched count. Falling back to Unknown.")
             data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
 
         results.extend(data)
         time.sleep(pause)
     return results
 
-
-# --- MAIN ENTRYPOINT ---
+# --- MAIN ---
 def main():
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
@@ -227,5 +221,5 @@ def main():
     sheet.append_rows(enriched, value_input_option="RAW")
     print(f"✅ Wrote {len(enriched)} rows (Sport⇢Col H, League⇢Col I)")
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
