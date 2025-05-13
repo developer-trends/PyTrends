@@ -168,34 +168,50 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
     results = []
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
-        system = (
-            "You are a helpful assistant with full access to current internet information about sports and esports. "
-            "Given an array of trending terms from Google Trends, identify for each the correct sport and league/competition. "
-            "Return ONLY valid JSON in the format: [ { \"team\":<term>, \"sport\":<sport name>, \"league\":<league name> }, ... ]. "
-            "For terms referring to matches, include the sport and the league or competition. "
-            "If you cannot determine a sport or league, return \"Unknown\" for that field."
+
+        user_prompt = (
+            "Provide the Sport and League of these Trends: " +
+            json.dumps(batch, ensure_ascii=False) +
+            "\n\nReturn only JSON in the format: "
+            "[{\"team\":<title>, \"sport\":<sport>, \"league\":<league>}, ...]"
         )
-        user = f"Teams: {json.dumps(batch, ensure_ascii=False)}"
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role":"system","content":system},{"role":"user","content":user}],
-            temperature=0.0
-        )
-        text = resp.choices[0].message.content.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            text = parts[-1] if len(parts) > 2 else parts[1]
-        start, end = text.find('['), text.rfind(']')
-        json_str = text[start:end+1] if start!=-1 and end!=-1 else text
+
         try:
-            data = json.loads(json_str)
-        except JSONDecodeError:
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0
+            )
+            text = resp.choices[0].message.content.strip()
+
+            # Remove markdown wrapping if present
+            if text.startswith("```"):
+                parts = text.split("```")
+                text = parts[-1] if len(parts) > 2 else parts[1]
+
+            start, end = text.find('['), text.rfind(']')
+            json_str = text[start:end+1] if start != -1 and end != -1 else text
+
+            try:
+                data = json.loads(json_str)
+            except JSONDecodeError:
+                print("⚠️ Failed to parse JSON. Using Unknown fallback.")
+                data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+        except Exception as e:
+            print(f"❌ OpenAI API error: {e}")
             data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+
+        # Validate result count
         if len(data) != len(batch):
+            print("⚠️ Mismatched result count. Falling back to Unknown for this batch.")
             data = [{"team": t, "sport": "Unknown", "league": "Unknown"} for t in batch]
+
         results.extend(data)
         time.sleep(pause)
     return results
+
 
 # --- MAIN ENTRYPOINT ---
 def main():
