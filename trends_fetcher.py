@@ -168,16 +168,19 @@ def classify_sport_only(titles, batch_size=20, pause=0.5):
 
     for i in range(0, len(titles), batch_size):
         batch = titles[i:i+batch_size]
+            
+            user_prompt = (
+                "You will be given a list of Google Trends titles. "
+                "Each title may refer to a team, athlete, coach, stadium, tournament, or sports event. "
+                "Your task is to identify the most likely Sport associated with each title. "
+                "Examples of sports: Soccer, Basketball, American Football, Baseball, Cricket, MMA, Boxing, Tennis, Golf, Formula 1, Cycling, Esports, Olympics, etc. "
+                "If a title is clearly unrelated to any sport, respond with: {\"sport\": \"Not a sport\"}.\n\n"
+                "Use your best judgment for ambiguous names based on real-world relevance. "
+                "Respond ONLY with valid JSON as an array, like:\n"
+                "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Not a sport\"}]\n\n"
+                "Titles:\n" + json.dumps(batch, ensure_ascii=False)
+            )
 
-        user_prompt = (
-            "You will be given a list of Google Trends titles. "
-            "Each title may refer to a team, player, coach, match, stadium, or event. "
-            "For each, identify the most likely Sport it belongs to (e.g. Soccer, Basketball, MMA, etc). "
-            "If it is unrelated to sports, respond with: {\"sport\": \"Not a sport\"}.\n\n"
-            "Return ONLY valid JSON as an array like:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, ...]\n\n"
-            "Titles:\n" + json.dumps(batch, ensure_ascii=False)
-        )
 
         try:
             resp = client.chat.completions.create(
