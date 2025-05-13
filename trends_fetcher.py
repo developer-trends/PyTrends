@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+from json import JSONDecodeError
 import time
 from urllib.parse import quote
 import gspread
@@ -105,8 +106,6 @@ def extract_card_rows(page):
         parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
         ended   = parts[1].strip() if len(parts)>1 else ""
-
-        toggle = c.locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
@@ -201,7 +200,7 @@ def classify_sport_league(titles, batch_size=20, pause=0.5):
 # --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
-    rows = scrape_all_pages()
+    rows = scrape\ALL\_pages()
     if not rows:
         print("No trends scraped; check selectors.")
         return
