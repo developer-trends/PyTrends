@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-import os
-import json
-from json import JSONDecodeError
-import time
-import re
+import os, json, time
 from urllib.parse import quote
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from openai import OpenAI
-from deep_translator import GoogleTranslator
 
-# --- CONFIGURATION ---
-client = OpenAI(api_key=os.environ.get("GPT_AI"))
-
-# --- GOOGLE SHEETS SETUP ---
 def connect_to_sheet(sheet_name):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -22,10 +12,10 @@ def connect_to_sheet(sheet_name):
     ]
     creds_dict = json.loads(os.environ["GOOGLE_SA_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client_sheet = gspread.authorize(creds)
-    return client_sheet.open(sheet_name).get_worksheet(0)
+    client = gspread.authorize(creds)
+    # ← write into the FIRST tab (index=0)
+    return client.open(sheet_name).get_worksheet(0)
 
-# --- SCRAPING LOGIC ---
 def dismiss_cookie_banner(page):
     for label in ("Accept all", "I agree", "AGREE"):
         try:
@@ -46,29 +36,31 @@ def extract_table_rows(page):
     rows = page.locator("table tbody tr")
     total = rows.count()
     print(f"🔢 [table] found {total} rows – skipping the first one")
+
     out = []
+    # ← start at 1 to skip the very first <tr>
     for i in range(1, total):
         row = rows.nth(i)
-        if not row.is_visible():
+        if not row.is_visible(): 
             continue
         cells = row.locator("td")
-        if cells.count() < 5:
+        if cells.count() < 5: 
             continue
 
-        title = cells.nth(1).inner_text().split("\n")[0].strip()
+        title  = cells.nth(1).inner_text().split("\n")[0].strip()
         volume = cells.nth(2).inner_text().split("\n")[0].strip()
 
-        raw = cells.nth(3).inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        raw   = cells.nth(3).inner_text().split("\n")
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts)>1 else ""
 
         toggle = cells.nth(3).locator("div.vdw3Ld")
         target_publish = ended
         try:
             toggle.click(); time.sleep(0.2)
             raw2 = cells.nth(3).inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -85,6 +77,7 @@ def extract_table_rows(page):
         )
 
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+
     return out
 
 def extract_card_rows(page):
@@ -95,22 +88,25 @@ def extract_card_rows(page):
     cards = page.locator("div.mZ3RIc")
     total = cards.count()
     print(f"🃏 [card] found {total} cards – skipping the first one")
+
     out = []
+    # ← start at 1 to skip the very first card
     for i in range(1, total):
         c = cards.nth(i)
-        title = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
+        title  = c.locator("span.mUIrbf-vQzf8d").all_inner_texts()[0].strip()
         volume = c.locator("div.search-count-title").inner_text().strip()
 
         raw = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-        parts = [l for l in raw if l and l.lower() not in ("trending_up", "timelapse")]
+        parts = [l for l in raw if l and l.lower() not in ("trending_up","timelapse")]
         started = parts[0].strip() if parts else ""
-        ended = parts[1].strip() if len(parts) > 1 else ""
+        ended   = parts[1].strip() if len(parts)>1 else ""
+
+        toggle = c.locator("div.vdw3Ld")
         target_publish = ended
         try:
-            toggle = c.locator("div.vdw3Ld")
             toggle.click(); time.sleep(0.2)
             raw2 = c.locator("div.vdw3Ld").locator("xpath=..").inner_text().split("\n")
-            p2 = [l for l in raw2 if l and l.lower() not in ("trending_up", "timelapse")]
+            p2   = [l for l in raw2 if l and l.lower() not in ("trending_up","timelapse")]
             if p2:
                 target_publish = p2[0].strip()
         finally:
@@ -127,6 +123,7 @@ def extract_card_rows(page):
         )
 
         out.append([title, volume, started, ended, explore_url, target_publish, breakdown])
+
     return out
 
 def scrape_all_pages():
@@ -134,7 +131,7 @@ def scrape_all_pages():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=["--no-sandbox","--disable-setuid-sandbox"]
         )
         page = browser.new_page()
         page.goto("https://trends.google.com/trending?geo=KR&category=17&hl=en", timeout=60000)
@@ -146,7 +143,11 @@ def scrape_all_pages():
         page_num = 1
         while True:
             print(f"📄 Scraping page {page_num}")
-            batch = extract_table_rows(page) or extract_card_rows(page)
+            batch = extract_table_rows(page)
+            if not batch:
+                print("table extractor returned 0 → falling back to cards")
+                batch = extract_card_rows(page)
+
             print(f"  → got {len(batch)} rows")
             all_rows.extend(batch)
 
@@ -164,86 +165,14 @@ def scrape_all_pages():
         browser.close()
     return all_rows
 
-# --- GPT CLASSIFICATION WITH TRANSLATION ---
-def translate_title(text):
-    try:
-        cleaned = re.sub(r"[^\w\s가-힣一-龯ぁ-ゔァ-ヴー々〆〤]", "", text).strip()
-        translated = GoogleTranslator(source='auto', target='en').translate(cleaned)
-        return translated
-    except Exception as e:
-        print(f"⚠️ Translation failed for '{text}': {e}")
-        return text
-
-def classify_sport_only(titles, batch_size=20, pause=0.5):
-    results = []
-
-    for i in range(0, len(titles), batch_size):
-        batch = titles[i:i+batch_size]
-        translated_batch = [translate_title(title) for title in batch]
-
-        user_prompt = (
-            "You will be given a list of Google Trends titles. "
-            "Each title may refer to a team, athlete, coach, stadium, tournament, or sports event. "
-            "Your task is to identify the most likely Sport associated with each title. "
-            "Examples of sports: Soccer, Basketball, American Football, Baseball, Cricket, MMA, Boxing, Tennis, Golf, Formula 1, Cycling, Esports, Olympics, etc. "
-            "If a title is clearly unrelated to any sport, respond with: {\"sport\": \"Unknown\"}.\n\n"
-            "Use your best judgment for ambiguous names based on real-world relevance. "
-            "Respond ONLY with valid JSON as an array, like:\n"
-            "[{\"sport\": \"Soccer\"}, {\"sport\": \"Basketball\"}, {\"sport\": \"Unknown\"}]\n\n"
-            "Titles:\n" + json.dumps(translated_batch, ensure_ascii=False)
-        )
-
-        try:
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": user_prompt}],
-                temperature=0.5
-            )
-            text = resp.choices[0].message.content.strip()
-
-            print("\n🧠 GPT RAW RESPONSE:\n", text, "\n")
-
-            if "```" in text:
-                text = text.split("```")[-1].strip()
-
-            start, end = text.find("["), text.rfind("]")
-            json_str = text[start:end+1] if start != -1 and end != -1 else "[]"
-
-            try:
-                parsed = json.loads(json_str)
-            except JSONDecodeError:
-                print("⚠️ JSON parse error, using fallback 'Unknown'")
-                parsed = []
-
-            aligned = []
-            for j in range(len(batch)):
-                if j < len(parsed) and isinstance(parsed[j], dict) and "sport" in parsed[j]:
-                    aligned.append({"sport": parsed[j]["sport"]})
-                else:
-                    aligned.append({"sport": "Unknown"})
-
-        except Exception as e:
-            print(f"❌ OpenAI API error: {e}")
-            aligned = [{"sport": "Unknown"} for _ in batch]
-
-        results.extend(aligned)
-        time.sleep(pause)
-
-    return results
-
-# --- MAIN ENTRYPOINT ---
 def main():
     sheet = connect_to_sheet("Trends")
-    rows = scrape_all_pages()
-    if not rows:
-        print("No trends scraped; check selectors.")
-        return
-    titles = [r[0] for r in rows]
-    classified = classify_sport_only(titles)
-    enriched = [row + [info.get('sport', '')] for row, info in zip(rows, classified)]
-    sheet.clear()
-    sheet.append_rows(enriched, value_input_option="RAW")
-    print(f"✅ Wrote {len(enriched)} rows (Sport➞Col H)")
+    rows  = scrape_all_pages()
 
-if __name__ == "__main__":
+    # ← **no** header row here, just your data
+    sheet.clear()
+    sheet.append_rows(rows, value_input_option="RAW")
+    print(f"✅ {len(rows)} total trends saved to Google Sheet (1st tab)")
+
+if __name__=="__main__":
     main()
