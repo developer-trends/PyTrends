@@ -177,7 +177,7 @@ def scrape_all_pages():
 
 
 def trigger_google_apps_script():
-    url = "https://script.google.com/a/macros/300mediahub.com/s/AKfycbwRPjRjb_nD_D3gVEuFcClD6nIMrEA75ZQ6bbaFAm0qKuwbzubtQ7sVf7Wq-Z-QicaHBA/exec"
+    url = "https://script.google.com/macros/s/AKfycbwRPjRjb_nD_D3gVEuFcClD6nIMrEA75ZQ6bbaFAm0qKuwbzubtQ7sVf7Wq-Z-QicaHBA/exec"
     try:
         response = requests.post(url, timeout=180)
         if response.status_code == 200:
