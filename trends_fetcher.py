@@ -179,9 +179,9 @@ def scrape_all_pages():
 def trigger_google_apps_script():
     url = "https://script.google.com/a/macros/300mediahub.com/s/AKfycbwLh-0aMn1FtrV721xO6MJIxn4HbSdtQMIxtSjetv0rkyGxtvJCSPjg63y0JlbfEKSChg/exec"
     try:
-        response = requests.post(url)
+        response = requests.post(url, timeout=180)
         if response.status_code == 200:
-            print("Apps Script masterTrigger() triggered successfully.")
+            print("Trigger successfully.")
         else:
             print(f"Trigger failed: {response.status_code} — {response.text}")
     except Exception as e:
