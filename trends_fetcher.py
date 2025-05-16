@@ -177,7 +177,7 @@ def scrape_all_pages():
 
 
 def trigger_google_apps_script():
-    url = "https://script.google.com/macros/library/d/14XwxEIqpeOfqE3DqH4Jpat61Z3_Cg4FIHFxOG6wbBvrGWfIHTXgCSGc-/1"
+    url = "https://script.google.com/macros/s/AKfycbwkwMbeRjPElzoR6pJeZowa3xCmUpN17qUEX_pulrBTIankAAYe8ZDJFd5VolgU79ZinA/exec"
     try:
         response = requests.post(url, timeout=180)
         if response.status_code == 200:
