@@ -176,16 +176,16 @@ def scrape_all_pages():
     return all_rows
 
 
-def trigger_google_apps_script():
-    url = "https://script.google.com/macros/s/AKfycbwkwMbeRjPElzoR6pJeZowa3xCmUpN17qUEX_pulrBTIankAAYe8ZDJFd5VolgU79ZinA/exec"
-    try:
-        response = requests.post(url, timeout=180)
-        if response.status_code == 200:
-            print("Trigger successfully.")
-        else:
-            print(f"Trigger failed: {response.status_code} — {response.text}")
-    except Exception as e:
-        print(f"Error triggering Apps Script: {e}")
+# def trigger_google_apps_script():
+#     url = "https://script.google.com/macros/s/AKfycbwkwMbeRjPElzoR6pJeZowa3xCmUpN17qUEX_pulrBTIankAAYe8ZDJFd5VolgU79ZinA/exec"
+#     try:
+#         response = requests.post(url, timeout=180)
+#         if response.status_code == 200:
+#             print("Trigger successfully.")
+#         else:
+#             print(f"Trigger failed: {response.status_code} — {response.text}")
+#     except Exception as e:
+#         print(f"Error triggering Apps Script: {e}")
 
 
 def main():
@@ -196,7 +196,7 @@ def main():
     sheet.append_rows(rows, value_input_option="RAW")
     print(f"{len(rows)} total trends saved to Google Sheet")
 
-    trigger_google_apps_script()
+    # trigger_google_apps_script()
 
 
 if __name__ == "__main__":
