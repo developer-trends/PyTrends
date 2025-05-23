@@ -49,7 +49,7 @@ jobs:
           python -m playwright install-deps
           python -m playwright install
 
-      - name: 🔁 Trigger index.json regeneration
+      - name: Trigger index.json regeneration
         run: |
           echo "Requesting index-json.php regeneration..."
           curl -A "Mozilla/5.0" -s -w "%{http_code}\n" https://firstplaydev.wpenginepowered.com/wp-content/themes/hello-theme-child/index-json.php
