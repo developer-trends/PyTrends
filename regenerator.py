@@ -11,11 +11,11 @@ def trigger_json():
     try:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            print("✅ index.json regenerated")
+            print("index.json regenerated")
         else:
-            print(f"❌ Failed: HTTP {response.status_code}")
+            print(f"Failed: HTTP {response.status_code}")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
 
 schedule.every(1).minutes.do(trigger_json)
 
