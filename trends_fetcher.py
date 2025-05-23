@@ -9,6 +9,24 @@ from oauth2client.service_account import ServiceAccountCredentials
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 
+def regenerate_index_json():
+    url = "https://firstplaydev.wpenginepowered.com/wp-content/themes/hello-theme-child/index-json.php"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml"
+    }
+
+    try:
+        print(f"🔁 Regenerating index.json from: {url}")
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            print("✅ index.json regeneration triggered successfully.")
+        else:
+            print(f"❌ Failed to regenerate: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"❌ Error triggering regeneration: {e}")
+
+
 def connect_to_sheet(sheet_name):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -176,27 +194,15 @@ def scrape_all_pages():
     return all_rows
 
 
-# def trigger_google_apps_script():
-#     url = "https://script.google.com/macros/s/AKfycbwkwMbeRjPElzoR6pJeZowa3xCmUpN17qUEX_pulrBTIankAAYe8ZDJFd5VolgU79ZinA/exec"
-#     try:
-#         response = requests.post(url, timeout=180)
-#         if response.status_code == 200:
-#             print("Trigger successfully.")
-#         else:
-#             print(f"Trigger failed: {response.status_code} — {response.text}")
-#     except Exception as e:
-#         print(f"Error triggering Apps Script: {e}")
-
-
 def main():
+    regenerate_index_json()  # ✅ Trigger regeneration first
+
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
 
     sheet.clear()
     sheet.append_rows(rows, value_input_option="RAW")
     print(f"{len(rows)} total trends saved to Google Sheet")
-
-    # trigger_google_apps_script()
 
 
 if __name__ == "__main__":
