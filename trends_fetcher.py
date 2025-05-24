@@ -194,8 +194,21 @@ def scrape_all_pages():
     return all_rows
 
 
+# def main():
+#     regenerate_index_json()  # ✅ Trigger regeneration first
+
+#     sheet = connect_to_sheet("Trends")
+#     rows = scrape_all_pages()
+
+#     sheet.clear()
+#     sheet.append_rows(rows, value_input_option="RAW")
+#     print(f"{len(rows)} total trends saved to Google Sheet")
+
+
+# if __name__ == "__main__":
+#     main()
 def main():
-    regenerate_index_json()  # ✅ Trigger regeneration first
+    regenerate_index_json()
 
     sheet = connect_to_sheet("Trends")
     rows = scrape_all_pages()
@@ -203,7 +216,14 @@ def main():
     sheet.clear()
     sheet.append_rows(rows, value_input_option="RAW")
     print(f"{len(rows)} total trends saved to Google Sheet")
-
-
-if __name__ == "__main__":
-    main()
+    
+    try:
+        script_url = "https://script.google.com/macros/s/AKfycbxXqSqZADwroSFjYXiHuBlhh-OsWjDL22cUvCGQYFvwaKQgGc9o4rjry8ByhpGXCniPMA/exec"
+        payload = {"action": "start_master"}
+        response = requests.post(script_url, json=payload, timeout=10)
+        if response.status_code == 200:
+            print("masterTrigger function triggered successfully.")
+        else:
+            print(f"Failed to trigger script: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"Error calling Apps Script Web App: {e}")
